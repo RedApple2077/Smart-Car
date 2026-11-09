@@ -23,7 +23,7 @@ LF04 四路红外模块提供循迹输入；MPU6050、SSD1306 OLED 和 HC-05 作
 - 已生成并初始化 72 MHz HSE/PLL 时钟、I2C2、TIM2/TIM3 编码器接口、TIM4 双路 PWM、USART1/USART2，以及电机方向、STBY、LF04、启动按键和状态 LED 的 GPIO。
 - `Core/Src/main.c` 的 `main()` 已完成 HAL 与外设初始化，但主循环为空，定时器计数/PWM 尚未启动。
 - 尚未实现循迹策略、双轮速度闭环、应用安全门、设备驱动或规划文档第 7 节所列业务 API。
-- 尚未烧录、联调硬件或进行实车验证。当前只能确认工程能够构建，不能据此确认比赛功能可用。
+- 尚未烧录、联调硬件或进行实车验证。
 
 ## 构建
 
@@ -34,4 +34,4 @@ cmake --preset Debug
 cmake --build --preset Debug
 ```
 
-构建产物为 `build/Debug/Smart-Car.elf`。当前已验证 `Debug` 预设的配置、编译和链接；`Release` 预设已定义但本次未验证。
+构建产物为 `build/Debug/Smart-Car.elf`。当前已验证 `Debug` 预设的配置、编译和链接。
