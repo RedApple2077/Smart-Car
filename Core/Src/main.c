@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "sc_button.h"
+#include "sc_led.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -107,7 +108,15 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  /* PB5 上拉输入、PB9 推挽输出；STBY/PWM/方向脚已由 MX_GPIO_Init 置为安全电平。 */
+  if (sc_led_init() != SC_OK)
+  {
+    Error_Handler();
+  }
+  if (sc_button_init() != SC_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -117,6 +126,22 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    uint8_t button_events = sc_button_poll(HAL_GetTick());
+
+    /* 台架验证：按住按键时 LED 点亮，释放后熄灭。
+       正式状态灯语义应由应用层根据运行状态决定（文档 8.1）。 */
+    if ((button_events & SC_BUTTON_EVENT_PRESSED) != 0u)
+    {
+      (void)sc_led_set(1u);
+    }
+    if ((button_events & SC_BUTTON_EVENT_RELEASED) != 0u)
+    {
+      (void)sc_led_set(0u);
+    }
+    if ((button_events & SC_BUTTON_EVENT_LONG_PRESS) != 0u)
+    {
+      /* 按住 3 s：文档 8.1 的配置恢复请求入口，待应用层接入后在此转发。 */
+    }
   }
   /* USER CODE END 3 */
 }
