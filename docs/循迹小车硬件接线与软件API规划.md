@@ -10,7 +10,7 @@
 
 第二块 STM32F103C8T6、第二块 TB6612FNG、第二块 MPU6050 和第二个 HC-05 均作为备件。HC-SR04、SG90 云台和 PS/2 摇杆不进入比赛运行功能。面包板只用于原型验证，不作为比赛行驶时的可靠连接结构。
 
-本文只定义硬件连接、硬件模块边界、可实现 C 接口和未来验收方法，不搭建工程，不写控制实现，不提供 PID 增益，不规定详细停车时序。现有 `Smart-Car.ioc` 只配置了 SWD、SysTick 和内部 8 MHz 时钟，目标中的定时器、通信外设和 72 MHz HSE PLL 尚未写入工程。
+本文定义硬件连接、硬件模块边界、可实现 C 接口和未来验收方法，不提供 PID 增益，不规定详细停车时序。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART1/USART2 和相应 GPIO；应用层、设备驱动和业务控制实现尚未完成。
 
 ### 1.1 比赛边界
 
@@ -32,12 +32,25 @@
 
 ### 1.3 当前工程事实
 
+以下事实核对于 2026-11-09。只记录当前配置和源码中可验证的状态，不把外设已初始化等同于设备通信、控制功能或实车验证已经完成。
+
 - 工程路径：`C:\Users\RedApple\Documents\smart-car`。
-- 工程格式：STM32CubeMX 生成的 HAL 工程，CMake 构建，C11 标准。
+- 工程格式：STM32CubeMX 生成的 HAL 工程，CMake 构建，C11 标准。`CMakePresets.json` 提供 `Debug` 和 `Release` 预设，使用 Ninja 与 `cmake/gcc-arm-none-eabi.cmake` 工具链。
 - 当前 `.ioc` 器件：`STM32F103C8Tx`、LQFP48、STM32Cube FW_F1 V1.8.7。
-- 当前已用资源：`PA13` SWDIO、`PA14` SWCLK、SysTick。
-- 目标时钟：核心板已有 8 MHz HSE，未来可配置 PLL 到 72 MHz。该时钟目标尚未应用到 `.ioc`。
-- 本文不把上述目标资源描述为已经由 CubeMX 生成或已经通过实车验证。
+- 当前时钟：8 MHz HSE 经 PLL ×9 得到 72 MHz SYSCLK/HCLK；APB1 为 36 MHz，APB2 为 72 MHz，APB1/APB2 定时器时钟均为 72 MHz。`SystemClock_Config()` 使用 `FLASH_LATENCY_2`。
+- SWD 与系统节拍：`PA13` SWDIO、`PA14` SWCLK、SysTick。
+- I2C2：`PB10/PB11` 为 SCL/SDA，标准模式 100 kHz，7 位地址；MPU6050 与 OLED 的通信尚未实现。
+- TIM2：`PA0/PA1` 对应 `TIM2_CH1/CH2`，编码器模式 `TIM_ENCODERMODE_TI12`，输入滤波参数 10、预分频 0、周期 65535。当前只完成 `HAL_TIM_Encoder_Init()`，未调用启动计数 API。
+- TIM3：`PA6/PA7` 对应 `TIM3_CH1/CH2`，配置与 TIM2 相同。当前只完成 `HAL_TIM_Encoder_Init()`，未调用启动计数 API。
+- TIM4：`PB6/PB7` 对应 `TIM4_CH1/CH2`，PWM1 模式，预分频 0、周期 3599，定时器时钟 72 MHz 时 PWM 频率约 20 kHz；两通道初始比较值均为 0。当前只完成 PWM 初始化与通道配置，未调用 PWM 启动 API。
+- USART1：`PA9/PA10` 为 TX/RX，115200 8N1，无硬件流控，收发模式开启。
+- USART2：`PA2/PA3` 为 TX/RX，9600 8N1，无硬件流控，收发模式开启。
+- UART 中断：USART1 和 USART2 的 NVIC 中断已配置，生成的中断服务函数调用 `HAL_UART_IRQHandler()`；应用层收包、命令解析或遥测发送尚未实现。
+- 电机与状态输出：`PA4/AIN1`、`PA5/AIN2`、`PB0/BIN1`、`PB1/BIN2`、`PB8/TB6612_STBY`、`PB9/STATUS_LED` 均为推挽输出，初始电平为低。
+- 传感器与按键输入：`PB12..PB15` 为 `LF04_O1..O4`，`PB5` 为 `START_BTN`，均为上拉输入。
+- 当前源码边界：CubeMX 已生成 GPIO、I2C、TIM 和 UART 的 HAL 初始化代码；`main()` 完成这些初始化后进入空循环。工程尚无应用层、设备驱动、循迹策略、速度闭环、配置存储、遥测协议或规划文档第 7 节所列 API 的实现。
+- 当前构建状态：2026-11-09 使用本机 CMake、Ninja 和 Arm GNU Toolchain 实测 `cmake --preset Debug` 与 `cmake --build --preset Debug` 均成功，生成 `build/Debug/Smart-Car.elf`；`Release` 预设尚未验证。
+- 当前验证边界：上述状态只证明配置已生成、代码能够编译和链接；尚未完成烧录、外设通信、执行器联调或实车测试。
 
 ## 2. 44 项物料状态表
 
