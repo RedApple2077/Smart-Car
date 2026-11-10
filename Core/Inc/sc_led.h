@@ -18,11 +18,14 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
 
-#include "sc_status.h"
+/* Exported types ------------------------------------------------------------*/
+typedef enum {
+  SC_LED_OK = 0
+} sc_led_status_t;
 
 /* Exported functions prototypes ---------------------------------------------*/
-sc_status_t sc_led_init(void);
-sc_status_t sc_led_set(uint8_t on);
+sc_led_status_t sc_led_init(void);
+sc_led_status_t sc_led_set(uint8_t on);
 
 #ifdef __cplusplus
 }
