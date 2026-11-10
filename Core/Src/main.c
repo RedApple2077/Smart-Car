@@ -21,8 +21,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
-
 #include "sc_button.h"
 #include "sc_led.h"
 #include "sc_ssd1306.h"
@@ -54,9 +52,7 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-static uint8_t s_oled_ok = 0u;
-static uint8_t s_button_down = 0u;
-static uint32_t s_last_oled_ms = 0u;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -123,31 +119,8 @@ int main(void)
     Error_Handler();
   }
 
-  /* OLED 是辅助设备；初始化失败只关闭显示，不阻止按键/LED 运行（文档 8.4）。 */
-  s_oled_ok = (sc_ssd1306_init() == SC_OK) ? 1u : 0u;
-  if (s_oled_ok != 0u)
-  {
-    sc_run_state_t demo = {0};
-
-    /* 台架演示快照：验证文档 7.2 的显示字段，正式应用层会填入真实快照。 */
-    demo.phase = SC_RUN_READY;
-    demo.line.sample.raw_levels = 0x09u;  /* O1..O4 = 1001，直线 */
-    demo.line.black_mask = 0x06u;         /* 黑线掩码 0110 */
-    demo.line.semantic_state = SC_LINE_STRAIGHT;
-    demo.line.valid = 1u;
-    demo.wheels.left_speed_mm_s = 120;
-    demo.wheels.right_speed_mm_s = 120;
-    demo.wheels.valid = 1u;
-    demo.imu.valid = 1u;
-    demo.imu.calibrated = 1u;
-    demo.left_pwm_permille = 0;
-    demo.right_pwm_permille = 0;
-    demo.actuator_enabled = 0u;
-    if (sc_ssd1306_show(&demo) != SC_OK)
-    {
-      s_oled_ok = 0u;  /* 显示降级，不影响按键/LED */
-    }
-  }
+  /* OLED 是辅助设备；初始化失败只关闭显示，不阻止其他模块（文档 8.4）。 */
+  (void)sc_ssd1306_init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -157,41 +130,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    uint32_t now_ms = HAL_GetTick();
-    uint8_t button_events = sc_button_poll(now_ms);
-
-    /* 台架验证：按住按键时 LED 点亮，释放后熄灭。
-       正式状态灯语义应由应用层根据运行状态决定（文档 8.1）。 */
-    if ((button_events & SC_BUTTON_EVENT_PRESSED) != 0u)
-    {
-      s_button_down = 1u;
-      (void)sc_led_set(1u);
-    }
-    if ((button_events & SC_BUTTON_EVENT_RELEASED) != 0u)
-    {
-      s_button_down = 0u;
-      (void)sc_led_set(0u);
-    }
-    if ((button_events & SC_BUTTON_EVENT_LONG_PRESS) != 0u)
-    {
-      /* 按住 3 s：文档 8.1 的配置恢复请求入口，待应用层接入后在此转发。 */
-    }
-
-    /* 台架 OLED 验证：每 500 ms 更新一行按键/时间戳，只刷新变化的页。 */
-    if ((s_oled_ok != 0u) &&
-        ((uint32_t)(now_ms - s_last_oled_ms) >= 500u))
-    {
-      char line[SC_SSD1306_LINE_CHARS + 1u];
-
-      s_last_oled_ms = now_ms;
-      (void)snprintf(line, sizeof(line), "T:%lu B:%u",
-                     (unsigned long)now_ms, (unsigned int)s_button_down);
-      (void)sc_ssd1306_write_line(7u, line);
-      if (sc_ssd1306_refresh() != SC_OK)
-      {
-        s_oled_ok = 0u;  /* 显示降级，停止后续刷新 */
-      }
-    }
   }
   /* USER CODE END 3 */
 }
