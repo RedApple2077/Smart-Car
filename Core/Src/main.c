@@ -21,7 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "sc_button.h"
+#include "sc_led.h"
+#include "sc_ssd1306.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -107,7 +109,18 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  /* PB5 上拉输入、PB9 推挽输出；STBY/PWM/方向脚已由 MX_GPIO_Init 置为安全电平。 */
+  if (sc_led_init() != SC_OK)
+  {
+    Error_Handler();
+  }
+  if (sc_button_init() != SC_OK)
+  {
+    Error_Handler();
+  }
 
+  /* OLED 是辅助设备；初始化失败只关闭显示，不阻止其他模块（文档 8.4）。 */
+  (void)sc_ssd1306_init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
