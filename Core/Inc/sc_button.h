@@ -19,13 +19,15 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
 
-#include "sc_status.h"
-
 /* Exported constants --------------------------------------------------------*/
 #define SC_BUTTON_DEBOUNCE_MS   20u    /* 消抖稳定窗口 */
 #define SC_BUTTON_LONG_PRESS_MS 3000u  /* 长按判定门限，文档 8.1 要求至少 3 s */
 
 /* Exported types ------------------------------------------------------------*/
+typedef enum {
+  SC_BUTTON_OK = 0
+} sc_button_status_t;
+
 /* sc_button_poll() 返回的事件位，可同时置位。 */
 typedef enum {
   SC_BUTTON_EVENT_NONE       = 0,
@@ -35,7 +37,7 @@ typedef enum {
 } sc_button_event_t;
 
 /* Exported functions prototypes ---------------------------------------------*/
-sc_status_t sc_button_init(void);
+sc_button_status_t sc_button_init(void);
 uint8_t sc_button_poll(uint32_t now_ms);
 
 #ifdef __cplusplus

@@ -110,11 +110,11 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   /* PB5 上拉输入、PB9 推挽输出；STBY/PWM/方向脚已由 MX_GPIO_Init 置为安全电平。 */
-  if (sc_led_init() != SC_OK)
+  if (sc_led_init() != SC_LED_OK)
   {
     Error_Handler();
   }
-  if (sc_button_init() != SC_OK)
+  if (sc_button_init() != SC_BUTTON_OK)
   {
     Error_Handler();
   }

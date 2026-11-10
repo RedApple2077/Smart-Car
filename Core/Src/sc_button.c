@@ -30,7 +30,7 @@ static uint8_t sc_button_read_pressed(void)
 }
 
 /* Exported functions --------------------------------------------------------*/
-sc_status_t sc_button_init(void)
+sc_button_status_t sc_button_init(void)
 {
   GPIO_InitTypeDef gpio = {0};
 
@@ -45,7 +45,7 @@ sc_status_t sc_button_init(void)
   s_button.raw_change_ms = HAL_GetTick();
   s_button.press_ms = s_button.raw_change_ms;
 
-  return SC_OK;
+  return SC_BUTTON_OK;
 }
 
 uint8_t sc_button_poll(uint32_t now_ms)

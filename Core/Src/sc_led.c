@@ -10,7 +10,7 @@
 #include "main.h"
 
 /* Exported functions --------------------------------------------------------*/
-sc_status_t sc_led_init(void)
+sc_led_status_t sc_led_init(void)
 {
   GPIO_InitTypeDef gpio = {0};
 
@@ -24,9 +24,9 @@ sc_status_t sc_led_init(void)
   return sc_led_set(0u);
 }
 
-sc_status_t sc_led_set(uint8_t on)
+sc_led_status_t sc_led_set(uint8_t on)
 {
   HAL_GPIO_WritePin(STATUS_LED_GPIO_Port, STATUS_LED_Pin,
                     (on != 0u) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-  return SC_OK;
+  return SC_LED_OK;
 }
