@@ -22,6 +22,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "sc_button.h"
+#if SC_BUILD_HC05_BENCH
+#include "sc_bt_bench.h"
+#endif
 #include "sc_encoder.h"
 #include "sc_led.h"
 #include "sc_mpu6050.h"
@@ -132,6 +135,10 @@ int main(void)
   (void)sc_tb6612_init();
   (void)sc_encoder_init();
 
+#if SC_BUILD_HC05_BENCH
+  sc_bt_bench_init(HAL_GetTick());
+#endif
+
   /* MPU6050 与 OLED 都是辅助设备；失败只降级对应模块。 */
   if (sc_mpu6050_init() == SC_MPU6050_OK)
   {
@@ -149,6 +156,9 @@ int main(void)
     /* USER CODE BEGIN 3 */
     uint32_t now_ms = HAL_GetTick();
 
+#if SC_BUILD_HC05_BENCH
+    sc_bt_bench_service(now_ms);
+#endif
     sc_encoder_service(now_ms);
     sc_mpu6050_service(now_ms);
     sc_ssd1306_service(now_ms);
