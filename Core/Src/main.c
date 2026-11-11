@@ -24,6 +24,7 @@
 #include "sc_button.h"
 #include "sc_led.h"
 #include "sc_ssd1306.h"
+#include "sc_uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -109,6 +110,11 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  /* CubeMX 生成的 MX_USARTx_UART_Init() 是平台启动前提，失败由生成函数进入
+     Error_Handler；此处仅忽略 sc_uart_init() 的驱动绑定/接收挂接失败。 */
+  (void)sc_uart_init(SC_UART_USART1, 115200u);
+  (void)sc_uart_init(SC_UART_USART2, 9600u);
+
   /* PB5 上拉输入、PB9 推挽输出；STBY/PWM/方向脚已由 MX_GPIO_Init 置为安全电平。 */
   if (sc_led_init() != SC_LED_OK)
   {
@@ -130,6 +136,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    sc_uart_service();
   }
   /* USER CODE END 3 */
 }
