@@ -22,8 +22,15 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "sc_button.h"
+#if SC_BUILD_HC05_BENCH
+#include "sc_bt_bench.h"
+#endif
+#include "sc_encoder.h"
 #include "sc_led.h"
+#include "sc_mpu6050.h"
 #include "sc_ssd1306.h"
+#include "sc_tb6612.h"
+#include "sc_uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -109,6 +116,11 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  /* CubeMX 生成的 MX_USARTx_UART_Init() 是平台启动前提，失败由生成函数进入
+     Error_Handler；此处仅忽略 sc_uart_init() 的驱动绑定/接收挂接失败。 */
+  (void)sc_uart_init(SC_UART_USART1, 115200u);
+  (void)sc_uart_init(SC_UART_USART2, 9600u);
+
   /* PB5 上拉输入、PB9 推挽输出；STBY/PWM/方向脚已由 MX_GPIO_Init 置为安全电平。 */
   if (sc_led_init() != SC_LED_OK)
   {
@@ -119,7 +131,19 @@ int main(void)
     Error_Handler();
   }
 
-  /* OLED 是辅助设备；初始化失败只关闭显示，不阻止其他模块（文档 8.4）。 */
+  /* TB6612 初始化后保持 STBY 低，正式固件不主动发车。 */
+  (void)sc_tb6612_init();
+  (void)sc_encoder_init();
+
+#if SC_BUILD_HC05_BENCH
+  sc_bt_bench_init(HAL_GetTick());
+#endif
+
+  /* MPU6050 与 OLED 都是辅助设备；失败只降级对应模块。 */
+  if (sc_mpu6050_init() == SC_MPU6050_OK)
+  {
+    (void)sc_mpu6050_start_calibration(128u);
+  }
   (void)sc_ssd1306_init();
   /* USER CODE END 2 */
 
@@ -130,6 +154,15 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    uint32_t now_ms = HAL_GetTick();
+
+#if SC_BUILD_HC05_BENCH
+    sc_bt_bench_service(now_ms);
+#endif
+    sc_encoder_service(now_ms);
+    sc_mpu6050_service(now_ms);
+    sc_ssd1306_service(now_ms);
+    sc_uart_service();
   }
   /* USER CODE END 3 */
 }

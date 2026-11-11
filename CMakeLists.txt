@@ -28,6 +28,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
+# Select the isolated HC-05 bench firmware. Formal builds leave this OFF.
+option(SC_BENCH_BLUETOOTH
+       "Build the HC-05 bench command firmware" OFF)
+
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
@@ -46,9 +50,26 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_button.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_encoder.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_i2c2.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_led.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_mpu6050.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_ssd1306.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_tb6612.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_uart.c
 )
+
+if(SC_BENCH_BLUETOOTH)
+    set(SC_BUILD_HC05_BENCH_VALUE 1)
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_bt_bench.c
+    )
+    set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
+        OUTPUT_NAME "Smart-Car-HC05Bench"
+    )
+else()
+    set(SC_BUILD_HC05_BENCH_VALUE 0)
+endif()
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -58,6 +79,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
+    SC_BUILD_HC05_BENCH=${SC_BUILD_HC05_BENCH_VALUE}
 )
 
 # Remove wrong libob.a library dependency when using cpp files
