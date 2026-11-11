@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include "sc_encoder.h"
+#include "sc_line_service.h"
 #include "sc_tb6612.h"
 #include "sc_uart.h"
 
@@ -116,6 +117,16 @@ static void sc_bt_bench_writer_u64(sc_bt_bench_writer_t *writer,
   {
     sc_bt_bench_writer_char(writer, digits[--count]);
   }
+}
+
+static void sc_bt_bench_writer_hex8(sc_bt_bench_writer_t *writer,
+                                    uint8_t value)
+{
+  static const char digits[] = "0123456789ABCDEF";
+
+  sc_bt_bench_writer_text(writer, "0x");
+  sc_bt_bench_writer_char(writer, digits[(value >> 4u) & 0x0Fu]);
+  sc_bt_bench_writer_char(writer, digits[value & 0x0Fu]);
 }
 
 static void sc_bt_bench_writer_i64(sc_bt_bench_writer_t *writer,
@@ -340,6 +351,76 @@ static uint8_t sc_bt_bench_build_heartbeat(const sc_tb6612_state_t *tb)
   return (uint8_t)(writer.overflow == 0u);
 }
 
+static const char *sc_bt_bench_line_name(sc_line_class_t state)
+{
+  switch (state)
+  {
+    case SC_LINE_INVALID:
+      return "SC_LINE_INVALID";
+    case SC_LINE_STRAIGHT:
+      return "SC_LINE_STRAIGHT";
+    case SC_LINE_LEFT_RIGHT_ANGLE_CANDIDATE:
+      return "SC_LINE_LEFT_RIGHT_ANGLE_CANDIDATE";
+    case SC_LINE_RIGHT_RIGHT_ANGLE_CANDIDATE:
+      return "SC_LINE_RIGHT_RIGHT_ANGLE_CANDIDATE";
+    case SC_LINE_LEFT_LARGE_BEND_CANDIDATE:
+      return "SC_LINE_LEFT_LARGE_BEND_CANDIDATE";
+    case SC_LINE_RIGHT_LARGE_BEND_CANDIDATE:
+      return "SC_LINE_RIGHT_LARGE_BEND_CANDIDATE";
+    case SC_LINE_LEFT_FINE_ADJUST_CANDIDATE:
+      return "SC_LINE_LEFT_FINE_ADJUST_CANDIDATE";
+    case SC_LINE_RIGHT_FINE_ADJUST_CANDIDATE:
+      return "SC_LINE_RIGHT_FINE_ADJUST_CANDIDATE";
+    case SC_LINE_JUNCTION_CANDIDATE:
+      return "SC_LINE_JUNCTION_CANDIDATE";
+    case SC_LINE_LOST_CANDIDATE:
+      return "SC_LINE_LOST_CANDIDATE";
+    case SC_LINE_UNKNOWN_PATTERN:
+      return "SC_LINE_UNKNOWN_PATTERN";
+    default:
+      return NULL;
+  }
+}
+
+static uint8_t sc_bt_bench_build_line(const sc_line_state_t *line,
+                                      uint32_t now_ms)
+{
+  sc_bt_bench_writer_t writer;
+  const char *state_name =
+    sc_bt_bench_line_name(line->semantic_state);
+  int bit;
+
+  if (state_name == NULL)
+  {
+    return 0u;
+  }
+
+  sc_bt_bench_writer_init(&writer, s_response, sizeof(s_response));
+  sc_bt_bench_writer_text(&writer, "LINE raw=");
+  for (bit = 0; bit < 4; bit++)
+  {
+    sc_bt_bench_writer_char(
+      &writer, (char)('0' + ((line->sample.raw_levels >> bit) & 0x01u)));
+  }
+  sc_bt_bench_writer_text(&writer, " raw_hex=");
+  sc_bt_bench_writer_hex8(&writer, line->sample.raw_levels & 0x0Fu);
+  sc_bt_bench_writer_text(&writer, " black_mask=");
+  sc_bt_bench_writer_hex8(&writer, line->black_mask);
+  sc_bt_bench_writer_text(&writer, " state=");
+  sc_bt_bench_writer_text(&writer, state_name);
+  sc_bt_bench_writer_text(&writer, " valid=");
+  sc_bt_bench_writer_u64(&writer, line->sample.valid);
+  sc_bt_bench_writer_text(&writer, " t=");
+  sc_bt_bench_writer_u64(&writer, line->sample.sample_time_ms);
+  sc_bt_bench_writer_text(&writer, " seq=");
+  sc_bt_bench_writer_u64(&writer, line->sample.sequence);
+  sc_bt_bench_writer_text(&writer, " age=");
+  sc_bt_bench_writer_u64(
+    &writer, (uint32_t)(now_ms - line->sample.sample_time_ms));
+  sc_bt_bench_writer_finish(&writer);
+  return (uint8_t)(writer.overflow == 0u);
+}
+
 static void sc_bt_bench_command_error(const char *response)
 {
   (void)sc_bt_bench_safe_stop();
@@ -373,6 +454,41 @@ static void sc_bt_bench_handle_status(size_t token_count)
     return;
   }
   if (sc_bt_bench_build_status(&tb, &encoder) == 0u)
+  {
+    sc_bt_bench_command_error("ERR LINE\r\n");
+    return;
+  }
+  sc_bt_bench_send(s_response);
+}
+
+static void sc_bt_bench_handle_line(size_t token_count, uint32_t now_ms)
+{
+  sc_line_state_t line;
+
+  if (token_count != 1u)
+  {
+    sc_bt_bench_command_error("ERR CMD\r\n");
+    return;
+  }
+  if (sc_line_service_get_latest(&line) != SC_LINE_OK)
+  {
+    sc_bt_bench_command_error("ERR IO\r\n");
+    return;
+  }
+  if ((line.sample.valid == 0u) ||
+      ((line.sample.raw_levels & 0xF0u) != 0u) ||
+      (line.semantic_state == SC_LINE_INVALID))
+  {
+    sc_bt_bench_command_error("ERR IO\r\n");
+    return;
+  }
+  if (((int)line.semantic_state < (int)SC_LINE_INVALID) ||
+      ((int)line.semantic_state > (int)SC_LINE_UNKNOWN_PATTERN))
+  {
+    sc_bt_bench_command_error("ERR IO\r\n");
+    return;
+  }
+  if (sc_bt_bench_build_line(&line, now_ms) == 0u)
   {
     sc_bt_bench_command_error("ERR LINE\r\n");
     return;
@@ -534,6 +650,11 @@ static void sc_bt_bench_dispatch(char *line, uint32_t now_ms)
   {
     sc_bt_bench_handle_status(token_count);
   }
+  else if ((sc_bt_bench_text_equal(tokens[0], "LINE")) ||
+           (sc_bt_bench_text_equal(tokens[0], "LF")))
+  {
+    sc_bt_bench_handle_line(token_count, now_ms);
+  }
   else if (sc_bt_bench_text_equal(tokens[0], "ARM"))
   {
     sc_bt_bench_handle_arm(now_ms, token_count);
@@ -554,7 +675,8 @@ static void sc_bt_bench_dispatch(char *line, uint32_t now_ms)
   {
     if (token_count == 1u)
     {
-      sc_bt_bench_send("OK HELP PING STATUS ARM MOTOR STOP RESET\r\n");
+      sc_bt_bench_send(
+        "OK HELP PING STATUS LINE LF ARM MOTOR STOP RESET\r\n");
     }
     else
     {

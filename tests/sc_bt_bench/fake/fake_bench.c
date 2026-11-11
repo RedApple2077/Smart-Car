@@ -12,6 +12,7 @@ static size_t s_rx_tail;
 static sc_uart_stats_t s_uart_stats;
 static sc_tb6612_state_t s_tb_state;
 static sc_encoder_snapshot_t s_encoder_snapshot;
+static sc_line_state_t s_line_state;
 static uint8_t s_fail_read;
 static uint8_t s_fail_stats;
 static uint8_t s_fail_write;
@@ -21,6 +22,7 @@ static uint8_t s_fail_apply;
 static uint8_t s_fail_encoder_reset;
 static uint8_t s_fail_encoder_snapshot;
 static uint8_t s_fail_tb_state;
+static uint8_t s_fail_line_snapshot;
 static uint32_t s_standby_calls;
 static uint8_t s_last_standby_enable;
 static uint32_t s_apply_calls;
@@ -43,6 +45,13 @@ void fake_bench_reset(void)
   s_encoder_snapshot.valid = 1u;
   s_encoder_snapshot.left.valid = 1u;
   s_encoder_snapshot.right.valid = 1u;
+  memset(&s_line_state, 0, sizeof(s_line_state));
+  s_line_state.sample.raw_levels = 0x09u;
+  s_line_state.sample.sample_time_ms = 0u;
+  s_line_state.sample.sequence = 1u;
+  s_line_state.sample.valid = 1u;
+  s_line_state.black_mask = 0x06u;
+  s_line_state.semantic_state = SC_LINE_STRAIGHT;
   s_fail_read = 0u;
   s_fail_stats = 0u;
   s_fail_write = 0u;
@@ -52,6 +61,7 @@ void fake_bench_reset(void)
   s_fail_encoder_reset = 0u;
   s_fail_encoder_snapshot = 0u;
   s_fail_tb_state = 0u;
+  s_fail_line_snapshot = 0u;
   s_standby_calls = 0u;
   s_last_standby_enable = 0u;
   s_apply_calls = 0u;
@@ -141,6 +151,11 @@ void fake_bench_fail_tb_state(void)
   s_fail_tb_state = 1u;
 }
 
+void fake_bench_fail_line_snapshot(void)
+{
+  s_fail_line_snapshot = 1u;
+}
+
 sc_uart_stats_t *fake_bench_uart_stats(void)
 {
   return &s_uart_stats;
@@ -154,6 +169,11 @@ sc_tb6612_state_t *fake_bench_tb_state(void)
 sc_encoder_snapshot_t *fake_bench_encoder_snapshot(void)
 {
   return &s_encoder_snapshot;
+}
+
+sc_line_state_t *fake_bench_line_state(void)
+{
+  return &s_line_state;
 }
 
 uint32_t fake_bench_standby_calls(void)
@@ -384,4 +404,15 @@ sc_encoder_status_t sc_encoder_reset_counts(uint32_t now_ms)
   s_encoder_snapshot.left.valid = 1u;
   s_encoder_snapshot.right.valid = 1u;
   return SC_ENCODER_OK;
+}
+
+sc_line_status_t sc_line_service_get_latest(sc_line_state_t *state)
+{
+  if ((state == NULL) || (s_fail_line_snapshot != 0u))
+  {
+    s_fail_line_snapshot = 0u;
+    return SC_LINE_ERR_NOT_READY;
+  }
+  *state = s_line_state;
+  return SC_LINE_OK;
 }

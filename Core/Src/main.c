@@ -27,6 +27,8 @@
 #endif
 #include "sc_encoder.h"
 #include "sc_led.h"
+#include "sc_lf04.h"
+#include "sc_line_service.h"
 #include "sc_mpu6050.h"
 #include "sc_ssd1306.h"
 #include "sc_tb6612.h"
@@ -134,6 +136,7 @@ int main(void)
   /* TB6612 初始化后保持 STBY 低，正式固件不主动发车。 */
   (void)sc_tb6612_init();
   (void)sc_encoder_init();
+  (void)sc_lf04_init();
 
 #if SC_BUILD_HC05_BENCH
   sc_bt_bench_init(HAL_GetTick());
@@ -155,6 +158,19 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     uint32_t now_ms = HAL_GetTick();
+    sc_line_sample_t line_sample = {
+      .raw_levels = 0u,
+      .sample_time_ms = now_ms,
+      .sequence = 0u,
+      .valid = 0u
+    };
+
+    if (sc_lf04_sample(now_ms, &line_sample) != SC_LF04_OK)
+    {
+      line_sample.sample_time_ms = now_ms;
+      line_sample.valid = 0u;
+    }
+    (void)sc_line_service_update(&line_sample);
 
 #if SC_BUILD_HC05_BENCH
     sc_bt_bench_service(now_ms);

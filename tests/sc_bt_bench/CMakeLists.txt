@@ -37,6 +37,13 @@ set(SC_BT_BENCH_TEST_CASES
     init_safe_standby
     ping_exact
     status_fields
+    line_exact
+    line_alias_fragmented
+    line_candidate_states_valid
+    line_does_not_extend_motion
+    line_invalid_snapshot_safe_stop
+    line_unavailable_and_bad_argument
+    line_help_and_tx_full
     fragmented_crlf
     max_line_exact
     overlong_safe_stop

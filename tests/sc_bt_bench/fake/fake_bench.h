@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "sc_encoder.h"
+#include "sc_line_service.h"
 #include "sc_tb6612.h"
 #include "sc_uart.h"
 
@@ -26,10 +27,12 @@ void fake_bench_fail_next_apply(void);
 void fake_bench_fail_next_encoder_reset(void);
 void fake_bench_fail_encoder_snapshot(void);
 void fake_bench_fail_tb_state(void);
+void fake_bench_fail_line_snapshot(void);
 
 sc_uart_stats_t *fake_bench_uart_stats(void);
 sc_tb6612_state_t *fake_bench_tb_state(void);
 sc_encoder_snapshot_t *fake_bench_encoder_snapshot(void);
+sc_line_state_t *fake_bench_line_state(void);
 
 uint32_t fake_bench_standby_calls(void);
 uint8_t fake_bench_last_standby_enable(void);
