@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "sc_button.h"
 #include "sc_led.h"
+#include "sc_mpu6050.h"
 #include "sc_ssd1306.h"
 #include "sc_uart.h"
 /* USER CODE END Includes */
@@ -125,7 +126,11 @@ int main(void)
     Error_Handler();
   }
 
-  /* OLED 是辅助设备；初始化失败只关闭显示，不阻止其他模块（文档 8.4）。 */
+  /* MPU6050 与 OLED 都是辅助设备；失败只降级对应模块。 */
+  if (sc_mpu6050_init() == SC_MPU6050_OK)
+  {
+    (void)sc_mpu6050_start_calibration(128u);
+  }
   (void)sc_ssd1306_init();
   /* USER CODE END 2 */
 
@@ -136,6 +141,10 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    uint32_t now_ms = HAL_GetTick();
+
+    sc_mpu6050_service(now_ms);
+    sc_ssd1306_service(now_ms);
     sc_uart_service();
   }
   /* USER CODE END 3 */
