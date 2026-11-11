@@ -22,9 +22,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "sc_button.h"
+#include "sc_encoder.h"
 #include "sc_led.h"
 #include "sc_mpu6050.h"
 #include "sc_ssd1306.h"
+#include "sc_tb6612.h"
 #include "sc_uart.h"
 /* USER CODE END Includes */
 
@@ -126,6 +128,10 @@ int main(void)
     Error_Handler();
   }
 
+  /* TB6612 初始化后保持 STBY 低，正式固件不主动发车。 */
+  (void)sc_tb6612_init();
+  (void)sc_encoder_init();
+
   /* MPU6050 与 OLED 都是辅助设备；失败只降级对应模块。 */
   if (sc_mpu6050_init() == SC_MPU6050_OK)
   {
@@ -143,6 +149,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
     uint32_t now_ms = HAL_GetTick();
 
+    sc_encoder_service(now_ms);
     sc_mpu6050_service(now_ms);
     sc_ssd1306_service(now_ms);
     sc_uart_service();

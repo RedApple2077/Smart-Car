@@ -46,10 +46,12 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_button.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_encoder.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_i2c2.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_mpu6050.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_ssd1306.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_tb6612.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_uart.c
 )
 
