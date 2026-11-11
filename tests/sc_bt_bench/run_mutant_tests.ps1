@@ -153,6 +153,14 @@ try {
     -TestName "invalid_byte_safe_stop"
   Invoke-ExpectedPass -BuildDirectory $baselineBuild `
     -TestName "arm_tick_wrap"
+  Invoke-ExpectedPass -BuildDirectory $baselineBuild `
+    -TestName "line_exact"
+  Invoke-ExpectedPass -BuildDirectory $baselineBuild `
+    -TestName "line_alias_fragmented"
+  Invoke-ExpectedPass -BuildDirectory $baselineBuild `
+    -TestName "line_does_not_extend_motion"
+  Invoke-ExpectedPass -BuildDirectory $baselineBuild `
+    -TestName "line_invalid_snapshot_safe_stop"
 
   Invoke-Mutant -Name "limit_bypass" `
     -Original @'
@@ -306,6 +314,67 @@ try {
                               10000, &duration)))
 '@ `
     -TestName "motor_bounds_rejected"
+
+  Invoke-Mutant -Name "line_bit_order" `
+    -Original @'
+  for (bit = 0; bit < 4; bit++)
+'@ `
+    -Replacement @'
+  for (bit = 3; bit >= 0; bit--)
+'@ `
+    -TestName "line_exact"
+
+  Invoke-Mutant -Name "line_alias_missing" `
+    -Original @'
+  else if ((sc_bt_bench_text_equal(tokens[0], "LINE")) ||
+           (sc_bt_bench_text_equal(tokens[0], "LF")))
+'@ `
+    -Replacement @'
+  else if (sc_bt_bench_text_equal(tokens[0], "LINE"))
+'@ `
+    -TestName "line_alias_fragmented"
+
+  Invoke-Mutant -Name "line_query_safe_stop" `
+    -Original @'
+  if (sc_bt_bench_build_line(&line, now_ms) == 0u)
+  {
+    sc_bt_bench_command_error("ERR LINE\r\n");
+    return;
+  }
+  sc_bt_bench_send(s_response);
+}
+'@ `
+    -Replacement @'
+  if (sc_bt_bench_build_line(&line, now_ms) == 0u)
+  {
+    sc_bt_bench_command_error("ERR LINE\r\n");
+    return;
+  }
+  sc_bt_bench_command_error(s_response);
+}
+'@ `
+    -TestName "line_does_not_extend_motion"
+
+  Invoke-Mutant -Name "line_invalid_no_stop" `
+    -Original @'
+  if ((line.sample.valid == 0u) ||
+      ((line.sample.raw_levels & 0xF0u) != 0u) ||
+      (line.semantic_state == SC_LINE_INVALID))
+  {
+    sc_bt_bench_command_error("ERR IO\r\n");
+    return;
+  }
+'@ `
+    -Replacement @'
+  if ((line.sample.valid == 0u) ||
+      ((line.sample.raw_levels & 0xF0u) != 0u) ||
+      (line.semantic_state == SC_LINE_INVALID))
+  {
+    sc_bt_bench_send("ERR IO\r\n");
+    return;
+  }
+'@ `
+    -TestName "line_invalid_snapshot_safe_stop"
 
   Write-Host ("MUTANT SUMMARY: baseline passed; {0}/{0} mutants failed target tests" -f $mutantCount)
 }

@@ -105,6 +105,194 @@ static int test_status_fields(void)
   return 0;
 }
 
+static int test_line_exact(void)
+{
+  sc_line_state_t *line;
+
+  CHECK(start_bench(100u) == 0);
+  line = fake_bench_line_state();
+  line->sample.raw_levels = 0x08u;
+  line->sample.sample_time_ms = 100u;
+  line->sample.sequence = 42u;
+  line->sample.valid = 1u;
+  line->black_mask = 0x07u;
+  line->semantic_state = SC_LINE_LEFT_RIGHT_ANGLE_CANDIDATE;
+
+  inject_text("LINE\r\n");
+  sc_bt_bench_service(123u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(tx_equals(
+    0u,
+    "LINE raw=0001 raw_hex=0x08 black_mask=0x07 "
+    "state=SC_LINE_LEFT_RIGHT_ANGLE_CANDIDATE valid=1 "
+    "t=100 seq=42 age=23\r\n"));
+  CHECK(fake_bench_standby_calls() == 0u);
+  CHECK(fake_bench_apply_calls() == 0u);
+  return 0;
+}
+
+static int test_line_alias_fragmented(void)
+{
+  CHECK(start_bench(0u) == 0);
+  inject_text("L");
+  sc_bt_bench_service(0u);
+  CHECK(fake_bench_tx_count() == 0u);
+  inject_text("F\r");
+  sc_bt_bench_service(10u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(strncmp(fake_bench_tx_at(0u), "LINE raw=1001 ", 14u) == 0);
+  CHECK(strstr(fake_bench_tx_at(0u),
+               "state=SC_LINE_STRAIGHT valid=1") != NULL);
+  CHECK(fake_bench_standby_calls() == 0u);
+  return 0;
+}
+
+static int test_line_candidate_states_valid(void)
+{
+  static const struct {
+    uint8_t raw;
+    uint8_t mask;
+    sc_line_class_t state;
+    const char *name;
+  } cases[] = {
+    {0x0Fu, 0x00u, SC_LINE_LOST_CANDIDATE, "SC_LINE_LOST_CANDIDATE"},
+    {0x00u, 0x0Fu, SC_LINE_JUNCTION_CANDIDATE,
+     "SC_LINE_JUNCTION_CANDIDATE"},
+    {0x02u, 0x0Du, SC_LINE_UNKNOWN_PATTERN, "SC_LINE_UNKNOWN_PATTERN"}
+  };
+  sc_line_state_t *line;
+  size_t index;
+
+  CHECK(start_bench(0u) == 0);
+  line = fake_bench_line_state();
+  for (index = 0u; index < (sizeof(cases) / sizeof(cases[0])); index++)
+  {
+    fake_bench_clear_tx();
+    fake_bench_clear_calls();
+    line->sample.raw_levels = cases[index].raw;
+    line->black_mask = cases[index].mask;
+    line->sample.valid = 1u;
+    line->semantic_state = cases[index].state;
+    inject_text("LINE\r\n");
+    sc_bt_bench_service((uint32_t)(index * 10u));
+    CHECK(fake_bench_tx_count() == 1u);
+    CHECK(strncmp(fake_bench_tx_at(0u), "LINE raw=", 9u) == 0);
+    CHECK(strstr(fake_bench_tx_at(0u), cases[index].name) != NULL);
+    CHECK(strstr(fake_bench_tx_at(0u), "valid=1") != NULL);
+    CHECK(fake_bench_standby_calls() == 0u);
+    CHECK(fake_bench_apply_calls() == 0u);
+  }
+  return 0;
+}
+
+static int test_line_does_not_extend_motion(void)
+{
+  CHECK(start_bench(0u) == 0);
+  inject_text("ARM\r\nMOTOR L 100 100\r\n");
+  sc_bt_bench_service(0u);
+  CHECK(fake_bench_apply_calls() == 1u);
+  fake_bench_clear_calls();
+  fake_bench_clear_tx();
+
+  inject_text("LINE\r\n");
+  sc_bt_bench_service(50u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(strncmp(fake_bench_tx_at(0u), "LINE ", 5u) == 0);
+  CHECK(fake_bench_standby_calls() == 0u);
+  CHECK(fake_bench_apply_calls() == 0u);
+
+  sc_bt_bench_service(99u);
+  CHECK(fake_bench_standby_calls() == 0u);
+  sc_bt_bench_service(100u);
+  CHECK(fake_bench_standby_calls() == 1u);
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(tx_equals(1u, "OK STOP AUTO\r\n"));
+  return 0;
+}
+
+static int test_line_invalid_snapshot_safe_stop(void)
+{
+  sc_line_state_t *line;
+
+  CHECK(start_bench(0u) == 0);
+  line = fake_bench_line_state();
+  line->sample.valid = 0u;
+  line->black_mask = 0u;
+  line->semantic_state = SC_LINE_INVALID;
+  inject_text("LINE\r\n");
+  sc_bt_bench_service(10u);
+  CHECK(fake_bench_standby_calls() == 1u);
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(tx_equals(0u, "ERR IO\r\n"));
+
+  fake_bench_clear_calls();
+  fake_bench_clear_tx();
+  line->sample.valid = 1u;
+  line->sample.raw_levels = 0x19u;
+  line->black_mask = 0x06u;
+  line->semantic_state = SC_LINE_STRAIGHT;
+  inject_text("LF\r\n");
+  sc_bt_bench_service(20u);
+  CHECK(fake_bench_standby_calls() == 1u);
+  CHECK(tx_equals(0u, "ERR IO\r\n"));
+  return 0;
+}
+
+static int test_line_unavailable_and_bad_argument(void)
+{
+  CHECK(start_bench(0u) == 0);
+  fake_bench_fail_line_snapshot();
+  inject_text("LINE\r\n");
+  sc_bt_bench_service(10u);
+  CHECK(fake_bench_standby_calls() == 1u);
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(tx_equals(0u, "ERR IO\r\n"));
+
+  fake_bench_clear_calls();
+  fake_bench_clear_tx();
+  inject_text("LINE extra\r\n");
+  sc_bt_bench_service(20u);
+  CHECK(fake_bench_standby_calls() == 1u);
+  CHECK(tx_equals(0u, "ERR CMD\r\n"));
+
+  fake_bench_clear_calls();
+  fake_bench_clear_tx();
+  fake_bench_line_state()->semantic_state = (sc_line_class_t)99;
+  inject_text("LINE\r\n");
+  sc_bt_bench_service(30u);
+  CHECK(fake_bench_standby_calls() == 1u);
+  CHECK(tx_equals(0u, "ERR IO\r\n"));
+  return 0;
+}
+
+static int test_line_help_and_tx_full(void)
+{
+  CHECK(start_bench(0u) == 0);
+  inject_text("HELP\r\n");
+  sc_bt_bench_service(0u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(tx_equals(
+    0u, "OK HELP PING STATUS LINE LF ARM MOTOR STOP RESET\r\n"));
+
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+  inject_text("ARM\r\nMOTOR L 100 100\r\n");
+  sc_bt_bench_service(10u);
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+  fake_bench_fail_next_write();
+  inject_text("LINE\r\n");
+  sc_bt_bench_service(50u);
+  CHECK(fake_bench_tx_count() == 0u);
+  CHECK(fake_bench_standby_calls() == 0u);
+  sc_bt_bench_service(110u);
+  CHECK(fake_bench_standby_calls() == 1u);
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(tx_equals(0u, "OK STOP AUTO\r\n"));
+  return 0;
+}
+
 static int test_fragmented_crlf(void)
 {
   CHECK(start_bench(0u) == 0);
@@ -651,6 +839,14 @@ static const test_case_t s_tests[] = {
   {"init_safe_standby", test_init_safe_standby},
   {"ping_exact", test_ping_exact},
   {"status_fields", test_status_fields},
+  {"line_exact", test_line_exact},
+  {"line_alias_fragmented", test_line_alias_fragmented},
+  {"line_candidate_states_valid", test_line_candidate_states_valid},
+  {"line_does_not_extend_motion", test_line_does_not_extend_motion},
+  {"line_invalid_snapshot_safe_stop", test_line_invalid_snapshot_safe_stop},
+  {"line_unavailable_and_bad_argument",
+   test_line_unavailable_and_bad_argument},
+  {"line_help_and_tx_full", test_line_help_and_tx_full},
   {"fragmented_crlf", test_fragmented_crlf},
   {"max_line_exact", test_max_line_exact},
   {"overlong_safe_stop", test_overlong_safe_stop},

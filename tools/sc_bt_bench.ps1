@@ -4,7 +4,7 @@ param(
   [ValidatePattern('^COM[0-9]+$')]
   [string]$Port,
   [int]$Baud = 9600,
-  [ValidateSet("Probe", "DirectionMatrix")]
+  [ValidateSet("Probe", "Line", "DirectionMatrix")]
   [string]$Action = "Probe",
   [ValidateSet("All", "L", "R")]
   [string]$Wheel = "All",
@@ -173,6 +173,25 @@ try {
     }
     $null = Send-Command -Command "STOP" -Pattern "^OK STOP$"
     Write-Log "Probe completed"
+  }
+  elseif ($Action -eq "Line") {
+    $line = Send-Command -Command "LINE" -Pattern "^LINE "
+    $linePattern =
+      "^LINE raw=([01]{4}) raw_hex=0x([0-9A-F]{2}) " +
+      "black_mask=0x([0-9A-F]{2}) state=SC_LINE_[A-Z0-9_]+ " +
+      "valid=1 t=([0-9]+) seq=([0-9]+) age=([0-9]+)$"
+    $lineMatch = [regex]::Match($line, $linePattern)
+    if (-not $lineMatch.Success) {
+      throw ("LINE response malformed: " + $line)
+    }
+    $rawValue = [Convert]::ToInt32($lineMatch.Groups[1].Value, 2)
+    $rawHex = [Convert]::ToInt32($lineMatch.Groups[2].Value, 16)
+    $blackMask = [Convert]::ToInt32($lineMatch.Groups[3].Value, 16)
+    if (($rawValue -ne $rawHex) -or
+        ($blackMask -ne ((-bnot $rawValue) -band 0x0F))) {
+      throw ("LINE bit mapping mismatch: " + $line)
+    }
+    Write-Log "Line query completed"
   }
   else {
     $motionAttempted = $true
