@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "fake_bench.h"
@@ -40,6 +41,64 @@ static int prime_wheel_feedback(void)
   fake_bench_clear_tx();
   fake_bench_clear_calls();
   return 0;
+}
+
+static uint16_t capture_row_fault(const char *line)
+{
+  const char *cursor = line;
+  int comma_count = 0;
+
+  if (strncmp(line, "CAP,", 4u) != 0)
+  {
+    return UINT16_MAX;
+  }
+  while (*cursor != '\0')
+  {
+    if (*cursor == ',')
+    {
+      comma_count++;
+      if (comma_count == 9)
+      {
+        return (uint16_t)strtoul(cursor + 1, NULL, 10);
+      }
+    }
+    cursor++;
+  }
+  return UINT16_MAX;
+}
+
+static int export_capture_fault_mask(uint32_t start_ms, uint16_t *fault_mask)
+{
+  size_t capture_lines = 0u;
+  size_t loops = 0u;
+  uint16_t faults = 0u;
+  int ended = 0;
+
+  inject_text("CAPTURE\r\n");
+  while ((loops < 30u) && (ended == 0))
+  {
+    size_t index;
+
+    sc_bt_bench_service(start_ms + (uint32_t)loops);
+    for (index = 0u; index < fake_bench_tx_count(); index++)
+    {
+      const char *line = fake_bench_tx_at(index);
+
+      if (strncmp(line, "CAP,", 4u) == 0)
+      {
+        capture_lines++;
+        faults |= capture_row_fault(line);
+      }
+      else if (strcmp(line, "OK CAPTURE END\r\n") == 0)
+      {
+        ended = 1;
+      }
+    }
+    fake_bench_clear_tx();
+    loops++;
+  }
+  *fault_mask = faults;
+  return (capture_lines != 0u) && (ended != 0);
 }
 
 static int tx_equals(size_t index, const char *expected)
@@ -713,6 +772,114 @@ static int test_heartbeat_cadence(void)
   return 0;
 }
 
+static int test_heartbeat_suppressed_during_motion(void)
+{
+  CHECK(start_bench(0u) == 0);
+  inject_text("ARM\r\nMOTOR L 100 1500\r\n");
+  sc_bt_bench_service(0u);
+  fake_bench_clear_tx();
+
+  sc_bt_bench_service(999u);
+  sc_bt_bench_service(1000u);
+  sc_bt_bench_service(1001u);
+  CHECK(fake_bench_tx_count() == 0u);
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_ENABLED);
+  return 0;
+}
+
+static int test_heartbeat_resumes_after_motion_stop(void)
+{
+  CHECK(start_bench(0u) == 0);
+  inject_text("ARM\r\nMOTOR L 100 1000\r\n");
+  sc_bt_bench_service(0u);
+  fake_bench_clear_tx();
+
+  sc_bt_bench_service(999u);
+  sc_bt_bench_service(1000u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(tx_equals(0u, "OK STOP AUTO\r\n"));
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
+
+  fake_bench_clear_tx();
+  sc_bt_bench_service(1010u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(strncmp(fake_bench_tx_at(0u), "HB mode=", 8u) == 0);
+  return 0;
+}
+
+static int test_capture_export_heartbeat_suppressed(void)
+{
+  uint32_t now_ms;
+  uint32_t export_ms = 1001u;
+  size_t capture_lines = 0u;
+  size_t loops = 0u;
+  int ended = 0;
+  int saw_begin = 0;
+  int saw_heartbeat = 0;
+
+  CHECK(start_bench(0u) == 0);
+  inject_text("ARM\r\nMOTOR L 100 100\r\n");
+  sc_bt_bench_service(0u);
+  for (now_ms = 10u; now_ms <= 100u; now_ms += 10u)
+  {
+    sc_bt_bench_service(now_ms);
+    fake_bench_clear_tx();
+  }
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
+  fake_bench_clear_calls();
+  fake_bench_clear_tx();
+
+  inject_text("CAPTURE\r\n");
+  sc_bt_bench_service(999u);
+  CHECK(fake_bench_tx_count() == 3u);
+  CHECK(tx_equals(0u, "OK CAPTURE BEGIN N=11\r\n"));
+  saw_begin = 1;
+  capture_lines = 2u;
+  fake_bench_clear_tx();
+
+  fake_bench_full_next_write();
+  sc_bt_bench_service(1000u);
+  CHECK(fake_bench_tx_count() == 0u);
+  CHECK(fake_bench_standby_calls() == 0u);
+
+  while ((loops < 10u) && (ended == 0))
+  {
+    size_t index;
+
+    sc_bt_bench_service(export_ms++);
+    for (index = 0u; index < fake_bench_tx_count(); index++)
+    {
+      const char *line = fake_bench_tx_at(index);
+
+      if (strcmp(line, "OK CAPTURE BEGIN N=11\r\n") == 0)
+      {
+        saw_begin = 1;
+      }
+      else if (strncmp(line, "CAP,", 4u) == 0)
+      {
+        capture_lines++;
+      }
+      else if (strcmp(line, "OK CAPTURE END\r\n") == 0)
+      {
+        ended = 1;
+      }
+      else if (strncmp(line, "HB ", 3u) == 0)
+      {
+        saw_heartbeat = 1;
+      }
+    }
+    fake_bench_clear_tx();
+    loops++;
+  }
+
+  CHECK(ended == 1);
+  CHECK(saw_begin == 1);
+  CHECK(capture_lines == 11u);
+  CHECK(saw_heartbeat == 0);
+  CHECK(fake_bench_standby_calls() == 0u);
+  return 0;
+}
+
 static int test_uart_error_resets_parser(void)
 {
   CHECK(start_bench(0u) == 0);
@@ -896,6 +1063,95 @@ static int test_raw_requires_arm_and_limits(void)
   return 0;
 }
 
+static int test_raw_stall_zero_progress(void)
+{
+  uint32_t now_ms;
+  uint16_t fault_mask = 0u;
+
+  CHECK(start_bench(0u) == 0);
+  inject_text("ARM\r\nRAW B 300 600\r\n");
+  sc_bt_bench_service(0u);
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+
+  for (now_ms = 10u; now_ms <= 310u; now_ms += 10u)
+  {
+    fake_bench_advance_encoder(now_ms, 0, 0);
+    sc_bt_bench_service(now_ms);
+    if (now_ms < 310u)
+    {
+      fake_bench_clear_tx();
+    }
+  }
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(tx_equals(0u, "ERR STALL\r\n"));
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
+  CHECK(export_capture_fault_mask(320u, &fault_mask) == 1);
+  CHECK((fault_mask & ((1u << 4) | (1u << 5))) != 0u);
+  return 0;
+}
+
+static int test_raw_stall_jitter_keeps_window(void)
+{
+  uint32_t now_ms;
+  uint16_t fault_mask = 0u;
+
+  CHECK(start_bench(0u) == 0);
+  inject_text("ARM\r\nRAW L 300 600\r\n");
+  sc_bt_bench_service(0u);
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+
+  for (now_ms = 10u; now_ms <= 310u; now_ms += 10u)
+  {
+    /* 左编码器符号为 -1，原始 -1 对应物理正向 +1。 */
+    fake_bench_advance_encoder(
+      now_ms, (now_ms == 20u) ? -1 : 0, 0);
+    sc_bt_bench_service(now_ms);
+    if (now_ms < 310u)
+    {
+      fake_bench_clear_tx();
+    }
+  }
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(tx_equals(0u, "ERR STALL\r\n"));
+  CHECK(export_capture_fault_mask(320u, &fault_mask) == 1);
+  CHECK((fault_mask & (1u << 4)) != 0u);
+  return 0;
+}
+
+static int test_raw_stall_real_progress_passes(void)
+{
+  uint32_t now_ms;
+  uint16_t fault_mask = 0u;
+  int saw_stall = 0;
+
+  CHECK(start_bench(0u) == 0);
+  inject_text("ARM\r\nRAW L -300 600\r\n");
+  sc_bt_bench_service(0u);
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+
+  for (now_ms = 10u; now_ms <= 600u; now_ms += 10u)
+  {
+    /* 负命令要求物理计数持续减少；原始计数递增经 -1 符号后为负向。 */
+    fake_bench_advance_encoder(now_ms, 10, 0);
+    sc_bt_bench_service(now_ms);
+    if ((fake_bench_tx_count() != 0u) &&
+        (strstr(fake_bench_tx_at(0u), "ERR STALL") != NULL))
+    {
+      saw_stall = 1;
+    }
+    fake_bench_clear_tx();
+  }
+  CHECK(saw_stall == 0);
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
+  CHECK(export_capture_fault_mask(610u, &fault_mask) == 1);
+  CHECK(fault_mask == 0u);
+  return 0;
+}
+
 static int test_speed_requires_arm_and_feedback(void)
 {
   CHECK(start_bench(0u) == 0);
@@ -969,6 +1225,42 @@ static int test_speed_closed_loop_auto_stop(void)
   return 0;
 }
 
+static int test_speed_stall_zero_progress(void)
+{
+  uint32_t now_ms;
+  uint16_t fault_mask = 0u;
+  int saw_stall = 0;
+
+  CHECK(start_bench(0u) == 0);
+  CHECK(prime_wheel_feedback() == 0);
+  fake_bench_advance_encoder(60u, 0, 0);
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
+  inject_text("ARM\r\nSPEED B 200 600\r\n");
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+
+  for (now_ms = 70u; now_ms <= 450u; now_ms += 10u)
+  {
+    fake_bench_advance_encoder(now_ms, 0, 0);
+    sc_bt_bench_service(now_ms);
+    if ((fake_bench_tx_count() != 0u) &&
+        (strstr(fake_bench_tx_at(0u), "ERR STALL") != NULL))
+    {
+      saw_stall = 1;
+      break;
+    }
+    fake_bench_clear_tx();
+  }
+  CHECK(saw_stall == 1);
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
+  CHECK(export_capture_fault_mask(now_ms + 10u, &fault_mask) == 1);
+  CHECK(fault_mask != 0u);
+  return 0;
+}
+
 static int test_pid_ram_readback_and_state_gate(void)
 {
   const char *response;
@@ -1017,6 +1309,7 @@ static int test_capture_100hz_two_seconds(void)
   size_t capture_lines = 0u;
   size_t loops = 0u;
   int ended = 0;
+  int saw_begin = 0;
   char last_capture[FAKE_BENCH_TX_LINE_SIZE] = {0};
 
   CHECK(start_bench(0u) == 0);
@@ -1048,7 +1341,11 @@ static int test_capture_100hz_two_seconds(void)
     {
       const char *line = fake_bench_tx_at(index);
 
-      if (strncmp(line, "CAP,", 4u) == 0)
+      if (strcmp(line, "OK CAPTURE BEGIN N=201\r\n") == 0)
+      {
+        saw_begin = 1;
+      }
+      else if (strncmp(line, "CAP,", 4u) == 0)
       {
         capture_lines++;
         strncpy(last_capture, line, sizeof(last_capture) - 1u);
@@ -1063,6 +1360,7 @@ static int test_capture_100hz_two_seconds(void)
     loops++;
   }
   CHECK(ended == 1);
+  CHECK(saw_begin == 1);
   CHECK(capture_lines == 201u);
   CHECK(loops <= 68u);
   CHECK(strstr(last_capture, ",MOTOR,0,0,") != NULL);
@@ -1075,6 +1373,7 @@ static int test_capture_tx_full_retries(void)
   uint32_t now_ms;
   size_t capture_lines = 0u;
   int ended = 0;
+  int saw_begin = 0;
   size_t loops = 0u;
 
   CHECK(start_bench(0u) == 0);
@@ -1101,7 +1400,11 @@ static int test_capture_tx_full_retries(void)
     {
       const char *line = fake_bench_tx_at(index);
 
-      if (strncmp(line, "CAP,", 4u) == 0)
+      if (strcmp(line, "OK CAPTURE BEGIN N=11\r\n") == 0)
+      {
+        saw_begin = 1;
+      }
+      else if (strncmp(line, "CAP,", 4u) == 0)
       {
         capture_lines++;
       }
@@ -1114,6 +1417,7 @@ static int test_capture_tx_full_retries(void)
     loops++;
   }
   CHECK(ended == 1);
+  CHECK(saw_begin == 1);
   CHECK(capture_lines == 11u);
   return 0;
 }
@@ -1204,14 +1508,24 @@ static const test_case_t s_tests[] = {
   {"stop_command", test_stop_command},
   {"reset_only_stopped", test_reset_only_stopped},
   {"heartbeat_cadence", test_heartbeat_cadence},
+  {"heartbeat_suppressed_during_motion",
+   test_heartbeat_suppressed_during_motion},
+  {"heartbeat_resumes_after_motion_stop",
+   test_heartbeat_resumes_after_motion_stop},
+  {"capture_export_heartbeat_suppressed",
+   test_capture_export_heartbeat_suppressed},
   {"uart_error_resets_parser", test_uart_error_resets_parser},
   {"uart_io_failure_safe_stop", test_uart_io_failure_safe_stop},
   {"driver_failure_safe_stop", test_driver_failure_safe_stop},
   {"tx_full_stop_still_safe", test_tx_full_stop_still_safe},
   {"raw_requires_arm_and_limits", test_raw_requires_arm_and_limits},
+  {"raw_stall_zero_progress", test_raw_stall_zero_progress},
+  {"raw_stall_jitter_keeps_window", test_raw_stall_jitter_keeps_window},
+  {"raw_stall_real_progress_passes", test_raw_stall_real_progress_passes},
   {"speed_requires_arm_and_feedback",
    test_speed_requires_arm_and_feedback},
   {"speed_closed_loop_auto_stop", test_speed_closed_loop_auto_stop},
+  {"speed_stall_zero_progress", test_speed_stall_zero_progress},
   {"pid_ram_readback_and_state_gate",
    test_pid_ram_readback_and_state_gate},
   {"capture_100hz_two_seconds", test_capture_100hz_two_seconds},

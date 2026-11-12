@@ -49,7 +49,7 @@
 - 正式主循环：每 10 ms 推进 LF04/线路语义；每轮服务编码器，仅在新 sequence 时进入 Wheel Service；仅在新的有效双轮反馈上推进速度控制；`sc_app` 应用启动门、状态机、故障检测和唯一执行器提交。遥测 Service 在核心控制之后推进，IWDG 在全部必要 Service 完成后最后喂狗。
 - Bench 主循环：保留原有 LF04、编码器、蓝牙命令、心跳、MPU、OLED、UART 和限时单轮控制；同样只使用 `sc_safety_iwdg_init/feed` 接入看门狗。
 - 正式/Bench 隔离：正式 Debug/Release 不链接 `sc_bt_bench`，不包含蓝牙运动命令；Bench 产物为 `build/Bench/Smart-Car-HC05Bench.elf`，提供 `PING/STATUS/LINE/LF/ARM/MOTOR/STOP/RESET/HELP`。
-- 当前测试状态：UART 13/13 且缺陷变体 3/3；按键 3/3 且缺陷变体 1/1；Safety 3/3 且缺陷变体 1/1；Wheel Service 8/8 且缺陷变体 6/6；PID 6/6 且缺陷变体 4/4；双轮速度控制 10/10 且缺陷变体 7/7；循迹目标策略 13/13 且缺陷变体 7/7；I2C/MPU/OLED 15/15 且缺陷变体 13/13；TB6612/编码器 24/24 且缺陷变体 18/18；LF04/线路语义 13/13 且缺陷变体 11/11；App 24/24 且缺陷变体 10/10；Telemetry 8/8 且缺陷变体 5/5；Bench 39/39 且缺陷变体 18/18。全量 13 个主机套件共 179/179 通过，Speed Controller/Bench/App/Track/Telemetry/Safety 通过 GCC `-fanalyzer`，Debug/Release/Bench 均通过交叉编译。
+- 当前测试状态：UART 13/13 且缺陷变体 3/3；按键 3/3 且缺陷变体 1/1；Safety 3/3 且缺陷变体 1/1；Wheel Service 8/8 且缺陷变体 6/6；PID 6/6 且缺陷变体 4/4；双轮速度控制 10/10 且缺陷变体 7/7；循迹目标策略 13/13 且缺陷变体 7/7；I2C/MPU/OLED 15/15 且缺陷变体 13/13；TB6612/编码器 24/24 且缺陷变体 18/18；LF04/线路语义 13/13 且缺陷变体 11/11；App 24/24 且缺陷变体 10/10；Telemetry 8/8 且缺陷变体 5/5；Bench 46/46 且缺陷变体 26/26。全量 13 个主机套件共 186/186 个基线测试；Debug/Release/Bench 均通过交叉编译。
 - 当前硬件验证：TB6612 单轮短脉冲、左右通道隔离、自动停机、编码器计数和右电机方向纠正已完成台架验证；HC-05 SPP 已完成命令交互。MPU6050/OLED 的最终整车隔离、LF04 实物识别、双轮速度闭环、长稳、供电余量和赛道表现仍未验证。
 - 当前源码边界：正式闭环、应用安全状态机、故障恢复、IWDG、HC-05 5 Hz 遥测、2 Hz OLED、状态 LED、自动校零，以及 Bench 的 RAW/SPEED/PID/CAPTURE 已实现。持久化配置 Service 仍未实现；当前只有编译期默认参数与两个显式 VALID 标志。`SC_MOTOR_CALIBRATION_VALID` 和 `SC_MOTOR_TUNING_VALID` 必须保持 0，直到实物实验产生可追溯证据。
 
@@ -741,10 +741,10 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 | `LINE` / `LF` | 输出 LF04 原始电平、掩码和线路语义 | 只读。 |
 | `ARM` | 打开 5 秒布防窗口 | 电机必须已处于安全待机。 |
 | `MOTOR <L\|R> <±150> <100-2000>` | 单轮限时测试 | 必须布防，每次命令只执行一个受限窗口。 |
-| `RAW <L\|R\|B> <pwm> <100-2000>` | 开环阶跃辨识 | 必须布防；`abs(pwm)<=564`；B 同时同号输出；到期自动停。 |
-| `SPEED <L\|R\|B> <mm_s> <100-2000>` | 闭环速度阶跃 | 必须布防且双轮 Wheel 反馈有效；`abs(mm_s)<=500`；B 两侧同目标，单侧命令另一侧目标为 0。 |
+| `RAW <L\|R\|B> <pwm> <100-2000>` | 开环阶跃辨识 | 必须布防；`abs(pwm)<=564`；B 同时同号输出；到期自动停；高输出执行 300 ms 净进展检查。 |
+| `SPEED <L\|R\|B> <mm_s> <100-2000>` | 闭环速度阶跃 | 必须布防且双轮 Wheel 反馈有效；`abs(mm_s)<=500`；B 两侧同目标，单侧命令另一侧目标为 0；高输出执行目标理论计数 20% 的净进展检查。 |
 | `PID <L\|R\|B> <kp> <ki> <kd>` | 修改当前 RAM PID | 仅 TB6612 停止、未布防、速度控制器 STOPPED 时允许；三增益均限 `±10000`；保留 ff；响应回读。 |
-| `CAPTURE` | 导出最近一次 MOTOR/RAW/SPEED 捕获 | 必须停轮；100 Hz、最多 256 条；每次 service 最多发送 3 行，TX 满后后续重试。 |
+| `CAPTURE` | 导出最近一次 MOTOR/RAW/SPEED 捕获 | 必须停轮；100 Hz、最多 256 条；先发 `OK CAPTURE BEGIN N=<count>`，每次 service 最多发送 3 项，TX 满后后续重试，结束发 `OK CAPTURE END`。 |
 | `STOP` | 零输出并撤销 STBY | 任意时刻安全停止。 |
 | `RESET` | 停止状态下重置编码器计数 | 运行或布防状态拒绝。 |
 | `HELP` | 输出命令列表 | 只读。 |
@@ -758,9 +758,11 @@ CAP,time_ms,experiment_mode,target_l,target_r,speed_l,speed_r,
 pwm_l,pwm_r,fault_bits,controller_mode
 ```
 
-结束行为 `OK CAPTURE END`。捕获使用静态 256 条记录，不动态分配，不阻塞控制或看门狗喂狗。MOTOR/RAW 期间仍按新编码器 sequence 更新 Wheel Service 以便记录速度；SPEED 期间使用同一 Wheel/PID/速度控制模块闭环。任何串口错误、反馈超时、STOP 或命令解析失败都会撤销 ARM/active、停止速度控制并拉低 STBY。
+导出顺序为 `OK CAPTURE BEGIN N=<count>`、若干 `CAP,` 行、`OK CAPTURE END`。导出期间完全跳过心跳；通用发送失败仍执行安全停机，但 CAPTURE 分片遇到 Buffer Full/Busy 只保留进度并在后续 service 重试，不调用安全停机。捕获使用静态 256 条记录，不动态分配，不阻塞控制或看门狗喂狗。MOTOR/RAW 期间仍按新编码器 sequence 更新 Wheel Service 以便记录速度；SPEED 期间使用同一 Wheel/PID/速度控制模块闭环。任何串口错误、反馈超时、STOP 或命令解析失败都会撤销 ARM/active、停止速度控制并拉低 STBY。
 
-`tools/sc_hc05_tune.ps1` 只接受 `COMx + 9600 8N1`，且 Windows 能查询到设备名匹配 `HC-05`、`Bluetooth` 或 `Standard Serial over Bluetooth` 的 SPP 通道；无法查询、名称不匹配或 CH340/USB 串口均拒绝运行。动作包括 `Probe`、`SetPid`、`Identify`、`Step`、`Capture`；日志固定写入 `build/tune-logs`，UTF-8 无 BOM。Capture/Identify/Step 的捕获导出窗口均至少 30s。Identify 默认执行 3 轮 `RESET -> ARM -> RAW B 396 1000 -> STOP -> CAPTURE`，丢弃每轮前 30%，对后 70% 求左右中位速度。任一轮 vL/vR 非正，或三轮左右相对离散度 `(max-min)/median` 任一超过 10%，summary 写 `repeatability_ok=false` 并保留原始结果但不输出 cruise/ff；全部通过才给出 `0.97*min(vL,vR)` 和每侧 ff 建议。工具不修改源码或 VALID 标志。
+RAW 与 SPEED 在任一侧 `|实际TB命令|>=150` 时记录 300 ms 窗口起始物理计数、时间和目标。窗口到期后，RAW 要求沿实验命令方向至少净增 5 个计数；SPEED 要求控制器命令与目标同号，并按目标、实际经过时间、轮径和每转计数计算理论计数，要求净进展至少 20%。目标或输出为 0 的一侧豁免。无足够进展时 SAFE STOP、置对应左/右堵转 fault、记录捕获并返回 `ERR STALL`。
+
+`tools/sc_hc05_tune.ps1` 只接受 `COMx + 9600 8N1`，且所有 Action（包括 Probe）都必须从 COM 设备 DeviceID 查询 ContainerId，并验证同一 PnP Container 中存在名称匹配 `HC[- ]?05` 的设备。ContainerId 不可查、同容器无 HC-05、CH340、普通 USB serial 或仅名称含 Bluetooth 的通道均拒绝运行。动作包括 `Probe`、`SetPid`、`Identify`、`Step`、`Capture`；日志固定写入 `build/tune-logs`，UTF-8 无 BOM。Capture/Identify/Step 的捕获导出窗口均至少 30s。工具解析 `OK CAPTURE BEGIN N=<count>`，要求 CAP 行数精确相等、时间戳严格递增、mode 一致；Identify 和 Step 还要求首末覆盖至少 90% 期望时长且 fault 全为 0。不完整或故障数据先保留原始日志/CSV再抛错，不生成速度、ff 或 PID 性能结论。Identify 默认执行 3 轮 `RESET -> ARM -> RAW B 396 1000 -> STOP -> CAPTURE`，丢弃每轮前 30%，对后 70% 求左右中位速度。任一轮 vL/vR 非正，或三轮左右相对离散度 `(max-min)/median` 任一超过 10%，summary 写 `repeatability_ok=false` 并保留原始结果但不输出 cruise/ff；全部通过才给出 `0.97*min(vL,vR)` 和每侧 ff 建议。工具不修改源码或 VALID 标志。
 
 ### 8.3 HC-05 遥测
 

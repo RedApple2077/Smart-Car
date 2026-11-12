@@ -91,10 +91,10 @@ Bench 固件通过 USART2 与 HC-05 通信，串口参数为 `9600 8N1`。支持
 - `LINE` / `LF`：LF04 原始电平、掩码和线路语义。
 - `ARM`：打开 5 秒布防窗口。
 - `MOTOR <L|R> <±150> <100-2000>`：单轮受限测试。
-- `RAW <L|R|B> <pwm> <100-2000>`：开环辨识，`abs(pwm)<=564`，必须 ARM，自动停止。
-- `SPEED <L|R|B> <mm_s> <100-2000>`：闭环速度实验，`abs(mm_s)<=500`，必须 ARM 且 Wheel 反馈有效。
+- `RAW <L|R|B> <pwm> <100-2000>`：开环辨识，`abs(pwm)<=564`，必须 ARM；B 两侧同号输出；到期自动停止。
+- `SPEED <L|R|B> <mm_s> <100-2000>`：闭环速度实验，`abs(mm_s)<=500`，必须 ARM 且 Wheel 反馈有效；B 两侧同目标，单侧命令另一侧目标为 0。
 - `PID <L|R|B> <kp_milli> <ki_milli> <kd_milli>`：仅停止且未布防时修改 RAM 增益；范围 `±10000`，保留各侧 ff。
-- `CAPTURE`：停轮后导出最近一次 MOTOR/RAW/SPEED 的 100 Hz 样本，分块非阻塞发送。
+- `CAPTURE`：停轮后导出最近一次 MOTOR/RAW/SPEED 的 100 Hz 样本；先发送 `OK CAPTURE BEGIN N=<count>`，再分块发送 CAP 行和 `OK CAPTURE END`。
 - `STOP`：立即零输出并撤销 STBY。
 - `RESET`：停止状态下重置编码器计数。
 - `HELP`：命令列表。
@@ -109,7 +109,7 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action SetPid -Wheel B -KpMilli 100 -
 pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 200
 ```
 
-`sc_hc05_tune.ps1` 必须查询到名称匹配 `HC-05`、`Bluetooth` 或 `Standard Serial over Bluetooth` 的 SPP COM 设备；无法查询、名称不匹配或 CH340/USB 串口都会被拒绝。CAPTURE 导出窗口统一至少 30s，覆盖 201 行约 80 B/行在 9600 8N1 下的约 17s 传输。Identify 任一轮左右速度为非正，或左右三轮相对离散度任一超过 10% 时，只保留原始结果并给出 warning，不输出 cruise/ff 建议。日志只写到 `build/tune-logs`。实际 COM 口以设备管理器为准。所有运动命令都会驱动真实电机，只能在双轮悬空、电池和 ST-Link 已互斥连接时使用。PID 命令只改掉电即丢失的 RAM 参数，不修改源码或两个 VALID 标志。
+`sc_hc05_tune.ps1` 的所有动作都要求：Windows 能通过 COM 设备 DeviceID 读取 ContainerId，且同一 PnP Container 中存在名称匹配 `HC-05` 的设备。ContainerId 不可查、同容器无 HC-05、CH340 或普通 USB 串口均拒绝；不再凭通用 Bluetooth 名称放行。CAPTURE 导出窗口统一至少 30s，覆盖 201 行约 80 B/行在 9600 8N1 下的约 17s 传输。工具先解析 BEGIN 的 expected count，再核对 CAP 行数精确相等、时间戳严格递增、模式一致及 Identify/Step 的时长覆盖和非零 fault；不完整或故障数据保留原始日志/CSV 后抛错，不产生速度、ff 或 PID 性能结论。Identify 任一轮左右速度为非正，或左右三轮相对离散度任一超过 10% 时，只保留原始结果并给出 warning，不输出 cruise/ff 建议。日志只写到 `build/tune-logs`。实际 COM 口以设备管理器为准。所有运动命令都会驱动真实电机，只能在双轮悬空、电池和 ST-Link 已互斥连接时使用。PID 命令只改掉电即丢失的 RAM 参数，不修改源码或两个 VALID 标志。
 
 ## 验证状态
 
@@ -125,10 +125,10 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 200
 - I2C2/MPU6050/SSD1306：15/15，缺陷变体 13/13。
 - TB6612/编码器：24/24，缺陷变体 18/18。
 - LF04/线路语义：13/13，缺陷变体 11/11。
-- HC-05 Bench：39/39，缺陷变体 18/18。
+- HC-05 Bench：46/46，缺陷变体 26/26。
 - App：24/24，缺陷变体 10/10。
 - Telemetry：8/8，缺陷变体 5/5。
-- 全量 13 个主机测试套件共 179/179 通过。
+- 全量 13 个主机测试套件共 186/186 通过。
 - Speed Controller、Bench、App、Track、Telemetry、Safety 通过主机 GCC `-fanalyzer`，无分析告警。
 - Debug、Release、Bench 均通过交叉编译。
 
@@ -138,7 +138,7 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 200
 |---|---:|---:|---|
 | Debug | `5192 B` | `58804 B` | `0 B` / `0 B` |
 | Release | `5184 B` | `31424 B` | `0 B` / `0 B` |
-| Bench | `12480 B` | `59608 B` | `+7984 B` / `+11884 B` |
+| Bench | `12552 B` | `62056 B` | `+72 B` / `+2448 B` |
 
 资源差值为第四阶段相对上一版的变化。Release ELF 含 `sc_app_*`、`sc_telemetry_*`、`sc_safety_iwdg_*`，不含 CAPTURE 缓冲、RX 命令解析、`sc_bt_bench_*` 或 `RAW/SPEED/PID/CAPTURE` 命令字符串；Bench ELF 保留完整调参命令与捕获缓冲。
 
@@ -160,7 +160,7 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 200
 - 烧录前必须物理断开电池；烧录完成后移除 ST-Link，再接入电池运行。
 - 电机动力线不得带电热插拔。
 - 首次运动测试必须使驱动轮悬空，并保持电池开关随手可断。
-- Bench 运动命令只有限时、单轮、低占空比控制，不能替代应用安全门和速度闭环。
+- Bench 运动命令有 ARM、100..2000 ms 限时、RAW `±564`、SPEED `±500 mm/s` 和 STBY 安全停机；RAW/SPEED 支持单侧或双轮 B。`|实际TB命令|>=150` 时执行 300 ms 滚动净进展检查：RAW 至少净增 5 个物理计数，SPEED 至少达到按目标、轮径和 CPR 计算理论计数的 20%，否则 `ERR STALL`、锁存堵转 fault 并记录 CAPTURE。测试必须抬轮并保持电池开关随手可断。
 - IWDG 只在核心采样、状态推进、安全提交和必要 Service 完成后喂狗；受控 App FAULT 循环继续喂狗，不自动重启，恢复运动必须由下一次完整短按触发。
 - IWDG 初始化先写 `0xCCCC` 启动 LSI，再解锁并写 PR/RLR；更新位等待有固定上限，超时使正式与 Bench 启动进入紧急停机和 `Error_Handler`。
 - 丢线、线路无效、反馈超过 30 ms、控制失败和主循环间隔超过 100 ms属于可恢复 FAULT；TB6612/HAL/方向持续错误属于 FATAL，必须断电重启。

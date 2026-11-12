@@ -73,13 +73,20 @@ set(SC_BT_BENCH_TEST_CASES
     stop_command
     reset_only_stopped
     heartbeat_cadence
+    heartbeat_suppressed_during_motion
+    heartbeat_resumes_after_motion_stop
+    capture_export_heartbeat_suppressed
     uart_error_resets_parser
     uart_io_failure_safe_stop
     driver_failure_safe_stop
     tx_full_stop_still_safe
     raw_requires_arm_and_limits
+    raw_stall_zero_progress
+    raw_stall_jitter_keeps_window
+    raw_stall_real_progress_passes
     speed_requires_arm_and_feedback
     speed_closed_loop_auto_stop
+    speed_stall_zero_progress
     pid_ram_readback_and_state_gate
     capture_100hz_two_seconds
     capture_tx_full_retries

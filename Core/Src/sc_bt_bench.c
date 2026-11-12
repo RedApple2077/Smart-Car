@@ -35,10 +35,16 @@
 #define SC_BT_BENCH_CAPTURE_PERIOD_MS  10u
 #define SC_BT_BENCH_CAPTURE_CAPACITY   256u
 #define SC_BT_BENCH_CAPTURE_EXPORT_MAX 3u
+#define SC_BT_BENCH_STALL_PWM_PERMILLE 150
+#define SC_BT_BENCH_STALL_TIME_MS      300u
+#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 5
+#define SC_BT_BENCH_STALL_PROGRESS_DIVISOR 5u
 #define SC_BT_BENCH_FAULT_TB         (1u << 0)
 #define SC_BT_BENCH_FAULT_FEEDBACK   (1u << 1)
 #define SC_BT_BENCH_FAULT_UART       (1u << 2)
 #define SC_BT_BENCH_FAULT_CONTROL    (1u << 3)
+#define SC_BT_BENCH_FAULT_STALL_LEFT (1u << 4)
+#define SC_BT_BENCH_FAULT_STALL_RIGHT (1u << 5)
 
 typedef enum {
   SC_BT_BENCH_EXPERIMENT_NONE = 0,
@@ -66,6 +72,14 @@ typedef struct {
   size_t length;
   uint8_t overflow;
 } sc_bt_bench_writer_t;
+
+typedef struct {
+  uint32_t window_start_ms;
+  int64_t window_start_count;
+  int32_t window_target_mm_s;
+  int8_t command_sign;
+  uint8_t active;
+} sc_bt_bench_stall_state_t;
 
 static uint8_t s_initialized;
 static char s_line[SC_BT_BENCH_MAX_LINE_BYTES + 1u];
@@ -98,7 +112,11 @@ static uint32_t s_capture_start_ms;
 static uint32_t s_capture_last_sample_ms;
 static uint8_t s_capture_has_sample;
 static uint8_t s_capture_export_active;
+static uint8_t s_capture_export_begin_sent;
 static uint16_t s_capture_export_index;
+static sc_bt_bench_stall_state_t s_stall[2];
+static int64_t s_physical_count[2];
+static uint8_t s_physical_count_valid[2];
 static uint16_t s_last_fault_bits;
 static uint32_t s_current_service_ms;
 
@@ -234,6 +252,18 @@ static void sc_bt_bench_reset_parser(void)
   s_line[0] = '\0';
 }
 
+static void sc_bt_bench_reset_stall(void)
+{
+  uint8_t side;
+
+  for (side = 0u; side < 2u; side++)
+  {
+    s_stall[side] = (sc_bt_bench_stall_state_t){0};
+    s_physical_count[side] = 0;
+    s_physical_count_valid[side] = 0u;
+  }
+}
+
 static sc_tb6612_status_t sc_bt_bench_safe_stop(void)
 {
   sc_tb6612_status_t status;
@@ -246,6 +276,8 @@ static sc_tb6612_status_t sc_bt_bench_safe_stop(void)
   s_target_left_mm_s = 0;
   s_target_right_mm_s = 0;
   s_capture_export_active = 0u;
+  s_capture_export_begin_sent = 0u;
+  sc_bt_bench_reset_stall();
 
   status = SC_TB6612_OK;
   if (s_speed_ready != 0u)
@@ -409,6 +441,105 @@ static const char *sc_bt_bench_experiment_name(uint8_t mode)
   }
 }
 
+static int32_t sc_bt_bench_abs_i32(int32_t value)
+{
+  return (value < 0) ? -value : value;
+}
+
+static int16_t sc_bt_bench_abs_i16(int16_t value)
+{
+  return (int16_t)((value < 0) ? -value : value);
+}
+
+static int64_t sc_bt_bench_physical_count(int64_t total_count, int8_t sign)
+{
+  if (sign >= 0)
+  {
+    return total_count;
+  }
+  if (total_count == INT64_MIN)
+  {
+    return INT64_MAX;
+  }
+  return -total_count;
+}
+
+static int64_t sc_bt_bench_saturating_multiply_positive(
+  int64_t left, int64_t right)
+{
+  if ((left <= 0) || (right <= 0))
+  {
+    return 0;
+  }
+  if (left > (INT64_MAX / right))
+  {
+    return INT64_MAX;
+  }
+  return left * right;
+}
+
+static int64_t sc_bt_bench_speed_stall_minimum_count(
+  uint8_t side, int32_t target_mm_s, uint32_t elapsed_ms)
+{
+  const uint32_t counts_per_rev =
+    (side == 0u) ? s_calibration.left_counts_per_rev :
+                   s_calibration.right_counts_per_rev;
+  const int32_t wheel_diameter_um =
+    (side == 0u) ? s_calibration.left_wheel_diameter_um :
+                   s_calibration.right_wheel_diameter_um;
+  int64_t distance_numerator;
+  int64_t counts_numerator;
+  int64_t circumference_numerator;
+  int64_t theoretical_counts;
+
+  /* 用 355/113 近似 pi，并至少要求理论计数的 20%。 */
+  distance_numerator = sc_bt_bench_saturating_multiply_positive(
+    (int64_t)sc_bt_bench_abs_i32(target_mm_s), (int64_t)elapsed_ms);
+  counts_numerator = sc_bt_bench_saturating_multiply_positive(
+    distance_numerator, (int64_t)counts_per_rev);
+  counts_numerator = sc_bt_bench_saturating_multiply_positive(
+    counts_numerator, 113);
+  circumference_numerator = (int64_t)wheel_diameter_um * 355;
+  if (circumference_numerator <= 0)
+  {
+    return INT64_MAX;
+  }
+  theoretical_counts = counts_numerator / circumference_numerator;
+  if (theoretical_counts < 1)
+  {
+    return 1;
+  }
+  return (theoretical_counts / SC_BT_BENCH_STALL_PROGRESS_DIVISOR) +
+    ((theoretical_counts % SC_BT_BENCH_STALL_PROGRESS_DIVISOR) != 0 ? 1 : 0);
+}
+
+static void sc_bt_bench_update_physical_count(
+  const sc_encoder_snapshot_t *snapshot)
+{
+  const sc_encoder_side_snapshot_t *sides[2] = {
+    &snapshot->left, &snapshot->right
+  };
+  const int8_t signs[2] = {
+    s_calibration.left_encoder_sign, s_calibration.right_encoder_sign
+  };
+  uint8_t side;
+
+  for (side = 0u; side < 2u; side++)
+  {
+    if ((snapshot->valid != 0u) && (sides[side]->valid != 0u) &&
+        (sides[side]->lost_sync == 0u))
+    {
+      s_physical_count[side] =
+        sc_bt_bench_physical_count(sides[side]->total_count, signs[side]);
+      s_physical_count_valid[side] = 1u;
+    }
+    else
+    {
+      s_physical_count_valid[side] = 0u;
+    }
+  }
+}
+
 static uint8_t sc_bt_bench_update_feedback(uint32_t now_ms)
 {
   sc_encoder_snapshot_t snapshot;
@@ -431,6 +562,7 @@ static uint8_t sc_bt_bench_update_feedback(uint32_t now_ms)
 
   s_last_encoder_sequence = snapshot.sequence;
   s_encoder_has_sequence = 1u;
+  sc_bt_bench_update_physical_count(&snapshot);
   wheel_status = sc_wheel_service_update(
     &s_wheel_service, &snapshot, &s_calibration, now_ms, &s_wheel);
   (void)wheel_status;
@@ -447,6 +579,123 @@ static uint8_t sc_bt_bench_speed_feedback_fresh(uint32_t now_ms)
      SC_WHEEL_MAX_SNAPSHOT_AGE_MS));
 }
 
+static uint8_t sc_bt_bench_monitor_stall(uint32_t now_ms)
+{
+  sc_tb6612_state_t tb_state;
+  int16_t commands[2] = {0, 0};
+  const int32_t targets[2] = {
+    s_target_left_mm_s, s_target_right_mm_s
+  };
+  const int16_t controller_outputs[2] = {
+    s_speed_output.left_permille, s_speed_output.right_permille
+  };
+  uint16_t fault_bits = 0u;
+  uint8_t side;
+
+  if ((s_motor_active == 0u) ||
+      ((s_experiment_mode != SC_BT_BENCH_EXPERIMENT_RAW) &&
+       (s_experiment_mode != SC_BT_BENCH_EXPERIMENT_SPEED)))
+  {
+    return 0u;
+  }
+  if (sc_tb6612_get_state(&tb_state) != SC_TB6612_OK)
+  {
+    return 0u;
+  }
+  commands[0] = tb_state.left_command;
+  commands[1] = tb_state.right_command;
+
+  for (side = 0u; side < 2u; side++)
+  {
+    int8_t actual_sign =
+      (commands[side] > 0) ? 1 : ((commands[side] < 0) ? -1 : 0);
+    int8_t expected_sign = actual_sign;
+    uint8_t active;
+
+    if (s_experiment_mode == SC_BT_BENCH_EXPERIMENT_SPEED)
+    {
+      int8_t target_sign =
+        (targets[side] > 0) ? 1 : ((targets[side] < 0) ? -1 : 0);
+      int8_t controller_sign =
+        (controller_outputs[side] > 0) ? 1 :
+        ((controller_outputs[side] < 0) ? -1 : 0);
+
+      expected_sign =
+        ((target_sign != 0) && (target_sign == controller_sign)) ?
+        target_sign : 0;
+    }
+
+    active = (uint8_t)(
+      (expected_sign != 0) &&
+      (sc_bt_bench_abs_i16(commands[side]) >=
+       SC_BT_BENCH_STALL_PWM_PERMILLE) &&
+      (s_physical_count_valid[side] != 0u));
+    if (active == 0u)
+    {
+      s_stall[side] = (sc_bt_bench_stall_state_t){0};
+      continue;
+    }
+
+    if ((s_stall[side].active == 0u) ||
+        (s_stall[side].command_sign != expected_sign))
+    {
+      s_stall[side].active = 1u;
+      s_stall[side].window_start_ms = now_ms;
+      s_stall[side].window_start_count = s_physical_count[side];
+      s_stall[side].window_target_mm_s = targets[side];
+      s_stall[side].command_sign = expected_sign;
+      continue;
+    }
+
+    if ((uint32_t)(now_ms - s_stall[side].window_start_ms) >=
+        SC_BT_BENCH_STALL_TIME_MS)
+    {
+      int64_t progress;
+      int64_t minimum_progress;
+      uint32_t elapsed_ms =
+        (uint32_t)(now_ms - s_stall[side].window_start_ms);
+
+      if (expected_sign > 0)
+      {
+        progress = s_physical_count[side] -
+          s_stall[side].window_start_count;
+      }
+      else
+      {
+        progress = s_stall[side].window_start_count -
+          s_physical_count[side];
+      }
+      minimum_progress =
+        (s_experiment_mode == SC_BT_BENCH_EXPERIMENT_RAW) ?
+        SC_BT_BENCH_STALL_RAW_MIN_COUNT :
+        sc_bt_bench_speed_stall_minimum_count(
+          side, s_stall[side].window_target_mm_s, elapsed_ms);
+
+      if (progress < minimum_progress)
+      {
+        fault_bits |= (side == 0u) ? SC_BT_BENCH_FAULT_STALL_LEFT :
+                                     SC_BT_BENCH_FAULT_STALL_RIGHT;
+      }
+      else
+      {
+        s_stall[side].window_start_ms = now_ms;
+        s_stall[side].window_start_count = s_physical_count[side];
+        s_stall[side].window_target_mm_s = targets[side];
+      }
+    }
+  }
+
+  if (fault_bits != 0u)
+  {
+    s_last_fault_bits |= fault_bits;
+    sc_bt_bench_capture_sample(now_ms);
+    (void)sc_bt_bench_safe_stop();
+    sc_bt_bench_send("ERR STALL\r\n");
+    return 1u;
+  }
+  return 0u;
+}
+
 static void sc_bt_bench_reset_capture(
   uint8_t mode, uint32_t now_ms, int32_t left_target,
   int32_t right_target)
@@ -456,8 +705,10 @@ static void sc_bt_bench_reset_capture(
   s_capture_last_sample_ms = now_ms;
   s_capture_has_sample = 0u;
   s_capture_export_active = 0u;
+  s_capture_export_begin_sent = 0u;
   s_capture_export_index = 0u;
   s_last_fault_bits = 0u;
+  sc_bt_bench_reset_stall();
   s_experiment_mode = mode;
   s_target_left_mm_s = left_target;
   s_target_right_mm_s = right_target;
@@ -542,6 +793,17 @@ static uint8_t sc_bt_bench_build_capture_line(uint16_t index)
   return (uint8_t)(writer.overflow == 0u);
 }
 
+static uint8_t sc_bt_bench_build_capture_begin(void)
+{
+  sc_bt_bench_writer_t writer;
+
+  sc_bt_bench_writer_init(&writer, s_response, sizeof(s_response));
+  sc_bt_bench_writer_text(&writer, "OK CAPTURE BEGIN N=");
+  sc_bt_bench_writer_u64(&writer, s_capture_count);
+  sc_bt_bench_writer_finish(&writer);
+  return (uint8_t)(writer.overflow == 0u);
+}
+
 static uint8_t sc_bt_bench_service_capture_export(void)
 {
   sc_uart_status_t status;
@@ -557,6 +819,31 @@ static uint8_t sc_bt_bench_service_capture_export(void)
        (s_capture_export_active != 0u);
        count++)
   {
+    if (s_capture_export_begin_sent == 0u)
+    {
+      if (sc_bt_bench_build_capture_begin() == 0u)
+      {
+        s_last_fault_bits |= SC_BT_BENCH_FAULT_UART;
+        sc_bt_bench_uart_fault();
+        return sent;
+      }
+      status = sc_bt_bench_write(s_response);
+      if ((status == SC_UART_ERR_BUFFER_FULL) ||
+          (status == SC_UART_ERR_BUSY))
+      {
+        return sent;
+      }
+      if (status != SC_UART_OK)
+      {
+        s_last_fault_bits |= SC_BT_BENCH_FAULT_UART;
+        sc_bt_bench_uart_fault();
+        return sent;
+      }
+      s_capture_export_begin_sent = 1u;
+      sent = 1u;
+      continue;
+    }
+
     if (s_capture_export_index < s_capture_count)
     {
       if (sc_bt_bench_build_capture_line(
@@ -596,6 +883,7 @@ static uint8_t sc_bt_bench_service_capture_export(void)
       return sent;
     }
     s_capture_export_active = 0u;
+    s_capture_export_begin_sent = 0u;
     sent = 1u;
   }
   return sent;
@@ -1156,6 +1444,7 @@ static void sc_bt_bench_handle_capture(size_t token_count)
     return;
   }
   s_capture_export_index = 0u;
+  s_capture_export_begin_sent = 0u;
   s_capture_export_active = 1u;
 }
 
@@ -1398,8 +1687,10 @@ void sc_bt_bench_init(uint32_t now_ms)
   s_capture_last_sample_ms = now_ms;
   s_capture_has_sample = 0u;
   s_capture_export_active = 0u;
+  s_capture_export_begin_sent = 0u;
   s_capture_export_index = 0u;
   s_last_fault_bits = 0u;
+  sc_bt_bench_reset_stall();
   s_calibration = (sc_wheel_calibration_t){
     .left_encoder_sign = SC_MOTOR_LEFT_ENCODER_SIGN,
     .right_encoder_sign = SC_MOTOR_RIGHT_ENCODER_SIGN,
@@ -1521,6 +1812,11 @@ void sc_bt_bench_service(uint32_t now_ms)
   }
 
   sc_bt_bench_service_motion(now_ms);
+  if ((s_feedback_updated != 0u) &&
+      (sc_bt_bench_monitor_stall(now_ms) != 0u))
+  {
+    activity = 1u;
+  }
   sc_bt_bench_capture_sample(now_ms);
   if (sc_bt_bench_service_capture_export() != 0u)
   {
@@ -1528,7 +1824,8 @@ void sc_bt_bench_service(uint32_t now_ms)
   }
 
   if ((sc_bt_bench_time_reached(now_ms, s_next_heartbeat_ms)) &&
-      (activity == 0u))
+      (activity == 0u) && (s_motor_active == 0u) &&
+      (s_capture_export_active == 0u))
   {
     s_next_heartbeat_ms = now_ms + SC_BT_BENCH_HEARTBEAT_MS;
     if (sc_tb6612_get_state(&tb) == SC_TB6612_OK)

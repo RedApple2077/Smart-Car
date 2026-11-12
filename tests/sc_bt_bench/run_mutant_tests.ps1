@@ -463,6 +463,104 @@ try {
 '@ `
     -TestName "capture_tx_full_retries"
 
+  Invoke-Mutant -Name "capture_heartbeat_not_suppressed" `
+    -Original @'
+  if ((sc_bt_bench_time_reached(now_ms, s_next_heartbeat_ms)) &&
+      (activity == 0u) && (s_motor_active == 0u) &&
+      (s_capture_export_active == 0u))
+'@ `
+    -Replacement @'
+  if ((sc_bt_bench_time_reached(now_ms, s_next_heartbeat_ms)) &&
+      (activity == 0u) && (s_motor_active == 0u))
+'@ `
+    -TestName "capture_export_heartbeat_suppressed"
+
+  Invoke-Mutant -Name "heartbeat_during_motion" `
+    -Original @'
+  if ((sc_bt_bench_time_reached(now_ms, s_next_heartbeat_ms)) &&
+      (activity == 0u) && (s_motor_active == 0u) &&
+      (s_capture_export_active == 0u))
+'@ `
+    -Replacement @'
+  if ((sc_bt_bench_time_reached(now_ms, s_next_heartbeat_ms)) &&
+      (activity == 0u) && (s_capture_export_active == 0u))
+'@ `
+    -TestName "heartbeat_suppressed_during_motion"
+
+  Invoke-Mutant -Name "capture_buffer_full_safe_stops" `
+    -Original @'
+      if ((status == SC_UART_ERR_BUFFER_FULL) ||
+          (status == SC_UART_ERR_BUSY))
+      {
+        return sent;
+      }
+'@ `
+    -Replacement @'
+      if ((status == SC_UART_ERR_BUFFER_FULL) ||
+          (status == SC_UART_ERR_BUSY))
+      {
+        (void)sc_bt_bench_safe_stop();
+        return sent;
+      }
+'@ `
+    -TestName "capture_export_heartbeat_suppressed"
+
+  Invoke-Mutant -Name "capture_begin_missing" `
+    -Original @'
+    if (s_capture_export_begin_sent == 0u)
+'@ `
+    -Replacement @'
+    if (0)
+'@ `
+    -TestName "capture_export_heartbeat_suppressed"
+
+  Invoke-Mutant -Name "capture_begin_count_wrong" `
+    -Original @'
+  sc_bt_bench_writer_text(&writer, "OK CAPTURE BEGIN N=");
+  sc_bt_bench_writer_u64(&writer, s_capture_count);
+'@ `
+    -Replacement @'
+  sc_bt_bench_writer_text(&writer, "OK CAPTURE BEGIN N=");
+  sc_bt_bench_writer_u64(&writer, s_capture_count + 1u);
+'@ `
+    -TestName "capture_100hz_two_seconds"
+
+  Invoke-Mutant -Name "stall_monitor_disabled" `
+    -Original @'
+  if ((s_motor_active == 0u) ||
+      ((s_experiment_mode != SC_BT_BENCH_EXPERIMENT_RAW) &&
+       (s_experiment_mode != SC_BT_BENCH_EXPERIMENT_SPEED)))
+  {
+    return 0u;
+  }
+'@ `
+    -Replacement @'
+  if (1)
+  {
+    return 0u;
+  }
+'@ `
+    -TestName "raw_stall_zero_progress"
+
+  Invoke-Mutant -Name "raw_stall_threshold_too_low" `
+    -Original @'
+#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 5
+'@ `
+    -Replacement @'
+#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 1
+'@ `
+    -TestName "raw_stall_jitter_keeps_window"
+
+  Invoke-Mutant -Name "speed_stall_threshold_zero" `
+    -Original @'
+  return (theoretical_counts / SC_BT_BENCH_STALL_PROGRESS_DIVISOR) +
+    ((theoretical_counts % SC_BT_BENCH_STALL_PROGRESS_DIVISOR) != 0 ? 1 : 0);
+'@ `
+    -Replacement @'
+  return 0 * theoretical_counts;
+'@ `
+    -TestName "speed_stall_zero_progress"
+
   Write-Host ("MUTANT SUMMARY: baseline passed; {0}/{0} mutants failed target tests" -f $mutantCount)
 }
 finally {

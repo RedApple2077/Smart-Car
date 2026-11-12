@@ -59,18 +59,6 @@ function Test-UnsupportedSerialDeviceName {
     "CP210\d*|FTDI")
 }
 
-function Test-BluetoothSppDeviceName {
-  param([string]$Name)
-
-  if ([string]::IsNullOrWhiteSpace($Name)) {
-    return $false
-  }
-  return (
-    $Name -match "(?i)HC[- ]?05" -or
-    $Name -match "(?i)(Standard Serial.*Bluetooth|Bluetooth.*(?:Standard Serial|SPP)|SPP.*Bluetooth)" -or
-    $Name -match "(蓝牙.*(?:标准串行|标准串口|SPP)|(?:标准串行|标准串口|SPP).*蓝牙)")
-}
-
 function ConvertTo-NormalizedContainerId {
   param([object]$Value)
 
@@ -125,43 +113,39 @@ function Resolve-AdapterSupport {
   }
 
   $normalizedContainerId = ConvertTo-NormalizedContainerId $ComContainerId
-  if ($ContainerLookupCompleted) {
-    if ($SameContainerHc05Found) {
-      return [pscustomobject]@{
-        supported = $true
-        evidence = "$PortName '$name'; HC-05 shares container $normalizedContainerId"
-        message = ""
-      }
-    }
+  if ((-not $ContainerLookupCompleted) -or
+      [string]::IsNullOrWhiteSpace($normalizedContainerId)) {
     return [pscustomobject]@{
       supported = $false
       evidence = (
-        "$PortName '$name'; container $normalizedContainerId has no HC-05" +
+        "$PortName '$name'; PnP container identity is unavailable" +
         $(if ([string]::IsNullOrWhiteSpace($ContainerDetail)) { "" } else { "; $ContainerDetail" })
       )
       message = (
-        "$acceptedMessage $PortName is not in the same PnP container as an HC-05 " +
-        "device (container $normalizedContainerId)."
+        "$acceptedMessage Windows container identity for $PortName is unavailable; " +
+        "a verified same-container HC-05 is required."
       )
     }
   }
 
-  if (Test-BluetoothSppDeviceName -Name $name) {
+  if ($SameContainerHc05Found) {
     return [pscustomobject]@{
       supported = $true
-      evidence = (
-        "$PortName '$name'; explicit Bluetooth SPP name fallback because container " +
-        "information is unavailable" +
-        $(if ([string]::IsNullOrWhiteSpace($ContainerDetail)) { "" } else { ": $ContainerDetail" })
-      )
+      evidence = "$PortName '$name'; HC-05 shares container $normalizedContainerId"
       message = ""
     }
   }
 
   return [pscustomobject]@{
     supported = $false
-    evidence = "$PortName '$name' is not an HC-05 or explicit Bluetooth SPP name"
-    message = "$acceptedMessage $PortName is reported as '$name'."
+    evidence = (
+      "$PortName '$name'; container $normalizedContainerId has no HC-05" +
+      $(if ([string]::IsNullOrWhiteSpace($ContainerDetail)) { "" } else { "; $ContainerDetail" })
+    )
+    message = (
+      "$acceptedMessage $PortName is not in the same PnP container as an HC-05 " +
+      "device (container $normalizedContainerId)."
+    )
   }
 }
 
@@ -179,20 +163,20 @@ function Get-DeviceContainerId {
 function Invoke-AdapterLogicSelfTest {
   $cases = @(
     [pscustomobject]@{
-      name = "chinese_spp_fallback"
+      name = "chinese_name_same_container_hc05"
       device = [pscustomobject]@{ Name = "蓝牙链接上的标准串行 (COM13)" }
-      containerLookupCompleted = $false
-      containerId = $null
-      sameContainerHc05 = $false
-      expected = $true
-    },
-    [pscustomobject]@{
-      name = "same_container_hc05"
-      device = [pscustomobject]@{ Name = "Bluetooth Standard Serial (COM13)" }
       containerLookupCompleted = $true
       containerId = "{00018EE4-989C-5927-977A-39B62B0B53D8}"
       sameContainerHc05 = $true
       expected = $true
+    },
+    [pscustomobject]@{
+      name = "bluetooth_name_without_container_rejected"
+      device = [pscustomobject]@{ Name = "Bluetooth Standard Serial (COM13)" }
+      containerLookupCompleted = $false
+      containerId = $null
+      sameContainerHc05 = $false
+      expected = $false
     },
     [pscustomobject]@{
       name = "container_without_hc05_rejected"
@@ -400,10 +384,19 @@ function Assert-ResetStatus {
   }
 }
 
+function Test-CanIgnorePreCaptureHeartbeat {
+  param([string]$Line, [int]$ExpectedCount)
+
+  return (($ExpectedCount -lt 0) -and ($Line -match "^HB "))
+}
+
 function Read-CaptureFrames {
   param([int]$TimeoutMs = 30000)
 
   $captureLines.Clear()
+  $expectedCount = -1
+  $ended = $false
+  $protocolErrors = [Collections.Generic.List[string]]::new()
   Write-Log "TX: CAPTURE"
   $serial.WriteLine("CAPTURE")
   $stopwatch = [Diagnostics.Stopwatch]::StartNew()
@@ -412,18 +405,49 @@ function Read-CaptureFrames {
     if ($null -eq $line) {
       continue
     }
+    if (Test-CanIgnorePreCaptureHeartbeat `
+        -Line $line -ExpectedCount $expectedCount) {
+      continue
+    }
+    if ($line -match "^OK CAPTURE BEGIN N=([0-9]+)$") {
+      if ($expectedCount -ge 0) {
+        $protocolErrors.Add("duplicate CAPTURE BEGIN")
+      }
+      else {
+        $expectedCount = [int]$Matches[1]
+        Write-Log ("CAPTURE BEGIN expected_count=" + $expectedCount)
+      }
+      continue
+    }
     if ($line.StartsWith("CAP,")) {
+      if ($expectedCount -lt 0) {
+        $protocolErrors.Add("CAP frame received before CAPTURE BEGIN")
+      }
       $captureLines.Add($line)
       continue
     }
     if ($line -eq "OK CAPTURE END") {
-      return @($captureLines)
+      $ended = $true
+      break
     }
     if ($line -match "^ERR ") {
       throw ("CAPTURE failed: " + $line)
     }
+    $protocolErrors.Add("unexpected line during CAPTURE: " + $line)
   }
-  throw "timeout waiting for OK CAPTURE END"
+  if (-not $ended) {
+    throw "timeout waiting for OK CAPTURE END"
+  }
+  if ($expectedCount -lt 0) {
+    $protocolErrors.Add("CAPTURE END without CAPTURE BEGIN")
+  }
+  if ($protocolErrors.Count -gt 0) {
+    throw ("invalid CAPTURE protocol: " + ($protocolErrors -join "; "))
+  }
+  return [pscustomobject]@{
+    expected_count = $expectedCount
+    lines = @($captureLines)
+  }
 }
 
 function Convert-CaptureRows {
@@ -449,6 +473,241 @@ function Convert-CaptureRows {
     })
   }
   return @($rows)
+}
+
+function Test-CaptureIntegrity {
+  param(
+    [object[]]$Rows,
+    [int]$ExpectedCount,
+    [string]$ExpectedMode = "",
+    [int]$ExpectedDurationMs = 0,
+    [switch]$RequireZeroFault
+  )
+
+  $rowList = @($Rows)
+  $errors = [Collections.Generic.List[string]]::new()
+  $maxGapMs = $null
+  if ($rowList.Count -ne $ExpectedCount) {
+    $errors.Add((
+      "sample count mismatch expected={0} actual={1}" -f
+      $ExpectedCount, $rowList.Count))
+  }
+  if ($rowList.Count -eq 0) {
+    $errors.Add("capture has no samples")
+  }
+  else {
+    for ($index = 1; $index -lt $rowList.Count; $index++) {
+      $gapMs = [int64]$rowList[$index].timestamp_ms -
+        [int64]$rowList[$index - 1].timestamp_ms
+      if (($null -eq $maxGapMs) -or ($gapMs -gt $maxGapMs)) {
+        $maxGapMs = $gapMs
+      }
+      if ($gapMs -le 0) {
+        $errors.Add((
+          "timestamp is not strictly increasing at row {0}" -f $index))
+      }
+    }
+
+    $modes = @($rowList |
+      ForEach-Object { [string]$_.mode } |
+      Select-Object -Unique)
+    if ($modes.Count -ne 1) {
+      $errors.Add("capture mixes experiment modes: " + ($modes -join ","))
+    }
+    if ((-not [string]::IsNullOrWhiteSpace($ExpectedMode)) -and
+        (@($rowList | Where-Object { $_.mode -ne $ExpectedMode }).Count -gt 0)) {
+      $errors.Add("capture mode does not match $ExpectedMode")
+    }
+    if ($RequireZeroFault -and
+        (@($rowList | Where-Object { $_.fault -ne 0 }).Count -gt 0)) {
+      $errors.Add("capture contains nonzero fault bits")
+    }
+  }
+
+  $coverageRatio = $null
+  $theoreticalSampleCount = $null
+  $minimumSampleCount = $null
+  $densityRatio = $null
+  if ($ExpectedDurationMs -gt 0) {
+    $theoreticalSampleCount =
+      [int][Math]::Floor($ExpectedDurationMs / 10) + 1
+    $minimumSampleCount =
+      [int][Math]::Ceiling([double]$theoreticalSampleCount * 0.90)
+    $densityRatio =
+      [double]$rowList.Count / [double]$theoreticalSampleCount
+    if ($ExpectedCount -lt $minimumSampleCount) {
+      $errors.Add((
+        "expected sample count {0} is below 90% of 100 Hz theory {1}" -f
+        $ExpectedCount, $theoreticalSampleCount))
+    }
+    if ($rowList.Count -lt $minimumSampleCount) {
+      $errors.Add((
+        "actual sample count {0} is below 90% of 100 Hz theory {1}" -f
+        $rowList.Count, $theoreticalSampleCount))
+    }
+    if (($null -ne $maxGapMs) -and ($maxGapMs -gt 30)) {
+      $errors.Add((
+        "capture timestamp gap {0} ms exceeds 30 ms" -f $maxGapMs))
+    }
+    if (($rowList.Count -lt 2) -or
+        ([uint32]$rowList[-1].timestamp_ms -le
+         [uint32]$rowList[0].timestamp_ms)) {
+      $errors.Add("capture duration coverage cannot be established")
+    }
+    else {
+      $spanMs = [int64]$rowList[-1].timestamp_ms -
+        [int64]$rowList[0].timestamp_ms
+      $coverageRatio = [double]$spanMs / [double]$ExpectedDurationMs
+      if ($coverageRatio -lt 0.90) {
+        $errors.Add((
+          "capture duration coverage {0:P1} is below 90%" -f
+          $coverageRatio))
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    valid = ($errors.Count -eq 0)
+    errors = @($errors)
+    coverage_ratio = $coverageRatio
+    theoretical_sample_count = $theoreticalSampleCount
+    minimum_sample_count = $minimumSampleCount
+    density_ratio = $densityRatio
+    max_gap_ms = $maxGapMs
+  }
+}
+
+function New-CaptureSelfTestRows {
+  param(
+    [uint32[]]$Timestamps,
+    [int]$Fault = 0,
+    [string]$Mode = "SPEED"
+  )
+
+  $rows = [Collections.Generic.List[object]]::new()
+  foreach ($timestamp in $Timestamps) {
+    $rows.Add([pscustomobject]@{
+      timestamp_ms = $timestamp
+      mode = $Mode
+      fault = $Fault
+    })
+  }
+  return @($rows)
+}
+
+function New-CaptureUniformSelfTestRows {
+  param(
+    [int]$DurationMs,
+    [int]$IntervalMs = 10,
+    [int]$Fault = 0,
+    [string]$Mode = "SPEED"
+  )
+
+  $timestamps = [Collections.Generic.List[uint32]]::new()
+  for ($timestamp = 0; $timestamp -le $DurationMs;
+       $timestamp += $IntervalMs) {
+    $timestamps.Add([uint32]$timestamp)
+  }
+  return New-CaptureSelfTestRows `
+    -Timestamps @($timestamps) -Fault $Fault -Mode $Mode
+}
+
+function Invoke-CaptureIntegritySelfTest {
+  $validRows = @(New-CaptureUniformSelfTestRows -DurationMs 2000)
+  $missingRows = @($validRows | Select-Object -First 200)
+  $duplicateRows = @(New-CaptureUniformSelfTestRows -DurationMs 2000)
+  $duplicateRows[-1].timestamp_ms = $duplicateRows[-2].timestamp_ms
+  $shortCoverageRows = @(
+    New-CaptureUniformSelfTestRows -DurationMs 1000 -IntervalMs 5)
+  $faultRows = @(New-CaptureUniformSelfTestRows -DurationMs 2000)
+  $faultRows[100].fault = 1
+  $slowRows = New-CaptureSelfTestRows `
+    -Timestamps @(0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000)
+  $gapTimes = [Collections.Generic.List[uint32]]::new()
+  for ($timestamp = 0; $timestamp -le 900; $timestamp += 10) {
+    $gapTimes.Add([uint32]$timestamp)
+  }
+  for ($timestamp = 1000; $timestamp -le 2000; $timestamp += 10) {
+    $gapTimes.Add([uint32]$timestamp)
+  }
+  $gapRows = New-CaptureSelfTestRows -Timestamps @($gapTimes)
+
+  $cases = @(
+    [pscustomobject]@{
+      name = "valid_complete_capture"
+      rows = $validRows
+      expectedCount = 201
+      durationMs = 2000
+      expectedValid = $true
+    },
+    [pscustomobject]@{
+      name = "missing_sample_rejected"
+      rows = $missingRows
+      expectedCount = 201
+      durationMs = 2000
+      expectedValid = $false
+    },
+    [pscustomobject]@{
+      name = "duplicate_timestamp_rejected"
+      rows = $duplicateRows
+      expectedCount = 201
+      durationMs = 2000
+      expectedValid = $false
+    },
+    [pscustomobject]@{
+      name = "short_coverage_rejected"
+      rows = $shortCoverageRows
+      expectedCount = 201
+      durationMs = 2000
+      expectedValid = $false
+    },
+    [pscustomobject]@{
+      name = "slow_sampling_rejected"
+      rows = $slowRows
+      expectedCount = 11
+      durationMs = 2000
+      expectedValid = $false
+    },
+    [pscustomobject]@{
+      name = "max_gap_rejected"
+      rows = $gapRows
+      expectedCount = $gapRows.Count
+      durationMs = 2000
+      expectedValid = $false
+    },
+    [pscustomobject]@{
+      name = "fault_rejected"
+      rows = $faultRows
+      expectedCount = 201
+      durationMs = 2000
+      expectedValid = $false
+    }
+  )
+
+  foreach ($case in $cases) {
+    $result = Test-CaptureIntegrity `
+      -Rows $case.rows `
+      -ExpectedCount $case.expectedCount `
+      -ExpectedMode "SPEED" `
+      -ExpectedDurationMs $case.durationMs `
+      -RequireZeroFault
+    if ($result.valid -ne $case.expectedValid) {
+      throw ("capture self-test failed: {0}; {1}" -f
+        $case.name, ($result.errors -join "; "))
+    }
+    Write-Host ("CAPTURE SELFTEST PASS: {0} -> valid={1}" -f
+      $case.name, $result.valid)
+  }
+  if (-not (Test-CanIgnorePreCaptureHeartbeat `
+        -Line "HB mode=STANDBY stby=0 L=0 R=0" -ExpectedCount -1)) {
+    throw "pre-BEGIN heartbeat was not ignored"
+  }
+  if (Test-CanIgnorePreCaptureHeartbeat `
+      -Line "HB mode=STANDBY stby=0 L=0 R=0" -ExpectedCount 201) {
+    throw "post-BEGIN heartbeat was incorrectly ignored"
+  }
+  Write-Host "CAPTURE SELFTEST PASS: pre-BEGIN heartbeat ignored; post-BEGIN rejected"
+  Write-Host ("CAPTURE SELFTEST OK: {0}/{0}" -f $cases.Count)
 }
 
 function Get-Median {
@@ -494,20 +753,33 @@ function Invoke-OpenLoopRound {
   $null = Send-Command "ARM" "^OK ARMED 5000$"
   $null = Send-Command "RAW B 396 1000" "^OK RAW PARAM=UNVERIFIED$"
   $terminal = Wait-ForTerminal -TimeoutMs 2500
-  if ($terminal -match "^ERR ") {
-    throw ("RAW failed: " + $terminal)
-  }
-  $lines = @(Read-CaptureFrames -TimeoutMs 30000)
-  $rows = @(Convert-CaptureRows -Lines $lines)
-  if ($rows.Count -lt 2) {
-    throw "CAPTURE contained fewer than two samples"
-  }
+  $capture = Read-CaptureFrames -TimeoutMs 30000
+  $rows = @(Convert-CaptureRows -Lines @($capture.lines))
   $csvPath = Join-Path $logRoot (
     "identify-round{0}-{1}.csv" -f $Round, $timestamp)
   Write-CsvNoBom -Path $csvPath -Rows $rows
+  $integrity = Test-CaptureIntegrity `
+    -Rows $rows `
+    -ExpectedCount $capture.expected_count `
+    -ExpectedMode "RAW" `
+    -ExpectedDurationMs 1000 `
+    -RequireZeroFault
+  if (-not $integrity.valid) {
+    Write-Log ("CAPTURE integrity failed: " + ($integrity.errors -join "; "))
+  }
+  if ($terminal -match "^ERR ") {
+    throw ("RAW failed: " + $terminal)
+  }
+  if (-not $integrity.valid) {
+    throw ("CAPTURE integrity failed: " + ($integrity.errors -join "; "))
+  }
   return [pscustomobject]@{
     round = $Round
     samples = $rows.Count
+    expected_samples = $capture.expected_count
+    coverage_ratio = $integrity.coverage_ratio
+    density_ratio = $integrity.density_ratio
+    max_gap_ms = $integrity.max_gap_ms
     vL396 = Get-TailMedian $rows "measured_left_mm_s"
     vR396 = Get-TailMedian $rows "measured_right_mm_s"
     csv = $csvPath
@@ -517,6 +789,7 @@ function Invoke-OpenLoopRound {
 try {
   if ($SelfTestAdapter) {
     Invoke-AdapterLogicSelfTest
+    Invoke-CaptureIntegritySelfTest
     return
   }
   Assert-SupportedAdapter
@@ -671,11 +944,25 @@ try {
     $command = "SPEED {0} {1} {2}" -f $Wheel, $TargetMmS, $DurationMs
     $null = Send-Command $command "^OK SPEED PARAM=UNVERIFIED$"
     $terminal = Wait-ForTerminal -TimeoutMs ($DurationMs + 2500)
+    $capture = Read-CaptureFrames -TimeoutMs 30000
+    $rows = @(Convert-CaptureRows -Lines @($capture.lines))
+    $rawCapturePath = Join-Path $logRoot ("step-capture-$timestamp.csv")
+    Write-CsvNoBom -Path $rawCapturePath -Rows $rows
+    $integrity = Test-CaptureIntegrity `
+      -Rows $rows `
+      -ExpectedCount $capture.expected_count `
+      -ExpectedMode "SPEED" `
+      -ExpectedDurationMs $DurationMs `
+      -RequireZeroFault
+    if (-not $integrity.valid) {
+      Write-Log ("CAPTURE integrity failed: " + ($integrity.errors -join "; "))
+    }
     if ($terminal -match "^ERR ") {
       throw ("SPEED failed: " + $terminal)
     }
-    $rows = @(Convert-CaptureRows -Lines @(
-      Read-CaptureFrames -TimeoutMs 30000))
+    if (-not $integrity.valid) {
+      throw ("CAPTURE integrity failed: " + ($integrity.errors -join "; "))
+    }
     $leftRows = @($rows | ForEach-Object {
       [pscustomobject]@{
         timestamp_ms = $_.timestamp_ms
@@ -710,10 +997,17 @@ try {
       right_ki_milli = $applied.Rki
       right_kd_milli = $applied.Rkd
       right_ff_milli = $applied.Rff
+      capture_expected_count = $capture.expected_count
+      capture_coverage_ratio = $integrity.coverage_ratio
+      capture_theoretical_sample_count = $integrity.theoretical_sample_count
+      capture_minimum_sample_count = $integrity.minimum_sample_count
+      capture_density_ratio = $integrity.density_ratio
+      capture_max_gap_ms = $integrity.max_gap_ms
       source = "measured_hardware"
-      note = "readback_confirmed_before_step"
+      note = "readback_confirmed; capture_integrity_passed"
     })
     Write-CsvNoBom -Path $metadataPath -Rows $metadata
+    Write-Host ("Raw capture: " + $rawCapturePath)
     Write-Host ("Left: " + $leftPath)
     Write-Host ("Right: " + $rightPath)
     Write-Host ("Metadata: " + $metadataPath)
@@ -723,10 +1017,15 @@ try {
     if ($status -notmatch "mode=STANDBY") {
       throw "CAPTURE requires TB6612 standby"
     }
-    $rows = @(Convert-CaptureRows -Lines @(
-      Read-CaptureFrames -TimeoutMs 30000))
+    $capture = Read-CaptureFrames -TimeoutMs 30000
+    $rows = @(Convert-CaptureRows -Lines @($capture.lines))
     $capturePath = Join-Path $logRoot ("capture-$timestamp.csv")
     Write-CsvNoBom -Path $capturePath -Rows $rows
+    $integrity = Test-CaptureIntegrity `
+      -Rows $rows -ExpectedCount $capture.expected_count
+    if (-not $integrity.valid) {
+      throw ("CAPTURE integrity failed: " + ($integrity.errors -join "; "))
+    }
     Write-Host ("Capture: " + $capturePath)
   }
 }
