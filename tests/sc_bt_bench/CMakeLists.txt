@@ -80,10 +80,14 @@ set(SC_BT_BENCH_TEST_CASES
     uart_io_failure_safe_stop
     driver_failure_safe_stop
     tx_full_stop_still_safe
+    raw_requires_fresh_feedback
     raw_requires_arm_and_limits
     raw_stall_zero_progress
     raw_stall_jitter_keeps_window
+    raw_stall_five_per_window_fails
     raw_stall_real_progress_passes
+    raw_feedback_lost_sync_stops
+    raw_feedback_sequence_freeze_stops
     speed_requires_arm_and_feedback
     speed_closed_loop_auto_stop
     speed_stall_zero_progress

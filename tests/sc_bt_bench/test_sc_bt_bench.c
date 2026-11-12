@@ -1019,18 +1019,38 @@ static int test_tx_full_stop_still_safe(void)
   return 0;
 }
 
-static int test_raw_requires_arm_and_limits(void)
+static int test_raw_requires_fresh_feedback(void)
 {
   CHECK(start_bench(0u) == 0);
-  inject_text("RAW B 564 100\r\n");
+  inject_text("ARM\r\nRAW B 100 100\r\n");
   sc_bt_bench_service(0u);
+  CHECK(fake_bench_apply_calls() == 0u);
+  CHECK(tx_equals(0u, "OK ARMED 5000\r\n"));
+  CHECK(tx_equals(1u, "ERR FEEDBACK\r\n"));
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
+  return 0;
+}
+
+static int test_raw_requires_arm_and_limits(void)
+{
+  uint32_t now_ms;
+
+  CHECK(start_bench(0u) == 0);
+  CHECK(prime_wheel_feedback() == 0);
+  fake_bench_advance_encoder(60u, -20, 20);
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+
+  inject_text("RAW B 564 100\r\n");
+  sc_bt_bench_service(60u);
   CHECK(fake_bench_apply_calls() == 0u);
   CHECK(tx_equals(0u, "ERR ARM\r\n"));
 
   fake_bench_clear_tx();
   fake_bench_clear_calls();
   inject_text("ARM\r\nRAW B 565 100\r\n");
-  sc_bt_bench_service(10u);
+  sc_bt_bench_service(65u);
   CHECK(fake_bench_apply_calls() == 0u);
   CHECK(tx_equals(0u, "OK ARMED 5000\r\n"));
   CHECK(tx_equals(1u, "ERR ARG\r\n"));
@@ -1038,26 +1058,30 @@ static int test_raw_requires_arm_and_limits(void)
   fake_bench_clear_tx();
   fake_bench_clear_calls();
   inject_text("ARM\r\nRAW L 100 99\r\n");
-  sc_bt_bench_service(15u);
+  sc_bt_bench_service(68u);
   CHECK(fake_bench_apply_calls() == 0u);
   CHECK(tx_equals(1u, "ERR ARG\r\n"));
 
   fake_bench_clear_tx();
   fake_bench_clear_calls();
   inject_text("ARM\r\nRAW R -564 2001\r\n");
-  sc_bt_bench_service(18u);
+  sc_bt_bench_service(70u);
   CHECK(fake_bench_apply_calls() == 0u);
   CHECK(tx_equals(1u, "ERR ARG\r\n"));
 
   fake_bench_clear_tx();
   fake_bench_clear_calls();
   inject_text("ARM\r\nRAW B 564 100\r\n");
-  sc_bt_bench_service(20u);
+  sc_bt_bench_service(70u);
   CHECK(fake_bench_apply_calls() == 1u);
   CHECK(fake_bench_last_left() == 564);
   CHECK(fake_bench_last_right() == 564);
   CHECK(tx_equals(1u, "OK RAW PARAM=UNVERIFIED\r\n"));
-  sc_bt_bench_service(120u);
+  for (now_ms = 80u; now_ms <= 170u; now_ms += 10u)
+  {
+    fake_bench_advance_encoder(now_ms, -20, 20);
+    sc_bt_bench_service(now_ms);
+  }
   CHECK(fake_bench_last_standby_enable() == 0u);
   CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
   return 0;
@@ -1069,16 +1093,20 @@ static int test_raw_stall_zero_progress(void)
   uint16_t fault_mask = 0u;
 
   CHECK(start_bench(0u) == 0);
+  CHECK(prime_wheel_feedback() == 0);
+  fake_bench_advance_encoder(60u, -20, 20);
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
   inject_text("ARM\r\nRAW B 300 600\r\n");
-  sc_bt_bench_service(0u);
+  sc_bt_bench_service(60u);
   fake_bench_clear_tx();
   fake_bench_clear_calls();
 
-  for (now_ms = 10u; now_ms <= 310u; now_ms += 10u)
+  for (now_ms = 70u; now_ms <= 370u; now_ms += 10u)
   {
     fake_bench_advance_encoder(now_ms, 0, 0);
     sc_bt_bench_service(now_ms);
-    if (now_ms < 310u)
+    if (now_ms < 370u)
     {
       fake_bench_clear_tx();
     }
@@ -1087,7 +1115,7 @@ static int test_raw_stall_zero_progress(void)
   CHECK(tx_equals(0u, "ERR STALL\r\n"));
   CHECK(fake_bench_last_standby_enable() == 0u);
   CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
-  CHECK(export_capture_fault_mask(320u, &fault_mask) == 1);
+  CHECK(export_capture_fault_mask(380u, &fault_mask) == 1);
   CHECK((fault_mask & ((1u << 4) | (1u << 5))) != 0u);
   return 0;
 }
@@ -1098,26 +1126,67 @@ static int test_raw_stall_jitter_keeps_window(void)
   uint16_t fault_mask = 0u;
 
   CHECK(start_bench(0u) == 0);
+  CHECK(prime_wheel_feedback() == 0);
+  fake_bench_advance_encoder(60u, -20, 20);
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
   inject_text("ARM\r\nRAW L 300 600\r\n");
-  sc_bt_bench_service(0u);
+  sc_bt_bench_service(60u);
   fake_bench_clear_tx();
   fake_bench_clear_calls();
 
-  for (now_ms = 10u; now_ms <= 310u; now_ms += 10u)
+  for (now_ms = 70u; now_ms <= 370u; now_ms += 10u)
   {
     /* 左编码器符号为 -1，原始 -1 对应物理正向 +1。 */
     fake_bench_advance_encoder(
-      now_ms, (now_ms == 20u) ? -1 : 0, 0);
+      now_ms, (now_ms == 80u) ? -1 : 0, 0);
     sc_bt_bench_service(now_ms);
-    if (now_ms < 310u)
+    if (now_ms < 370u)
     {
       fake_bench_clear_tx();
     }
   }
   CHECK(fake_bench_tx_count() == 1u);
   CHECK(tx_equals(0u, "ERR STALL\r\n"));
-  CHECK(export_capture_fault_mask(320u, &fault_mask) == 1);
+  CHECK(export_capture_fault_mask(380u, &fault_mask) == 1);
   CHECK((fault_mask & (1u << 4)) != 0u);
+  return 0;
+}
+
+static int test_raw_stall_five_per_window_fails(void)
+{
+  uint32_t now_ms;
+  int saw_stall = 0;
+
+  CHECK(start_bench(0u) == 0);
+  CHECK(prime_wheel_feedback() == 0);
+  fake_bench_advance_encoder(60u, -20, 20);
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
+  inject_text("ARM\r\nRAW L 300 1200\r\n");
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+
+  for (now_ms = 70u; now_ms <= 900u; now_ms += 10u)
+  {
+    int32_t delta =
+      ((now_ms == 100u) || (now_ms == 400u) || (now_ms == 700u)) ?
+      -5 : 0;
+
+    fake_bench_advance_encoder(now_ms, delta, 0);
+    sc_bt_bench_service(now_ms);
+    if ((fake_bench_tx_count() != 0u) &&
+        (strstr(fake_bench_tx_at(0u), "ERR STALL") != NULL))
+    {
+      saw_stall = 1;
+      break;
+    }
+    fake_bench_clear_tx();
+  }
+  CHECK(saw_stall == 1);
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
   return 0;
 }
 
@@ -1128,12 +1197,16 @@ static int test_raw_stall_real_progress_passes(void)
   int saw_stall = 0;
 
   CHECK(start_bench(0u) == 0);
+  CHECK(prime_wheel_feedback() == 0);
+  fake_bench_advance_encoder(60u, -20, 20);
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
   inject_text("ARM\r\nRAW L -300 600\r\n");
-  sc_bt_bench_service(0u);
+  sc_bt_bench_service(60u);
   fake_bench_clear_tx();
   fake_bench_clear_calls();
 
-  for (now_ms = 10u; now_ms <= 600u; now_ms += 10u)
+  for (now_ms = 70u; now_ms <= 660u; now_ms += 10u)
   {
     /* 负命令要求物理计数持续减少；原始计数递增经 -1 符号后为负向。 */
     fake_bench_advance_encoder(now_ms, 10, 0);
@@ -1147,8 +1220,67 @@ static int test_raw_stall_real_progress_passes(void)
   }
   CHECK(saw_stall == 0);
   CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
-  CHECK(export_capture_fault_mask(610u, &fault_mask) == 1);
+  CHECK(export_capture_fault_mask(670u, &fault_mask) == 1);
   CHECK(fault_mask == 0u);
+  return 0;
+}
+
+static int test_raw_feedback_lost_sync_stops(void)
+{
+  uint16_t fault_mask = 0u;
+
+  CHECK(start_bench(0u) == 0);
+  CHECK(prime_wheel_feedback() == 0);
+  fake_bench_advance_encoder(60u, -20, 20);
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
+  inject_text("ARM\r\nRAW L 100 600\r\n");
+  sc_bt_bench_service(60u);
+  CHECK(tx_equals(1u, "OK RAW PARAM=UNVERIFIED\r\n"));
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+
+  fake_bench_advance_encoder(70u, -20, 0);
+  sc_bt_bench_service(70u);
+  fake_bench_clear_tx();
+
+  fake_bench_encoder_snapshot()->left.lost_sync = 1u;
+  fake_bench_advance_encoder(80u, -20, 0);
+  sc_bt_bench_service(80u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(tx_equals(0u, "ERR FEEDBACK\r\n"));
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
+  CHECK(export_capture_fault_mask(90u, &fault_mask) == 1);
+  CHECK((fault_mask & (1u << 1)) != 0u);
+  return 0;
+}
+
+static int test_raw_feedback_sequence_freeze_stops(void)
+{
+  uint16_t fault_mask = 0u;
+
+  CHECK(start_bench(0u) == 0);
+  CHECK(prime_wheel_feedback() == 0);
+  fake_bench_advance_encoder(60u, -20, 20);
+  sc_bt_bench_service(60u);
+  fake_bench_clear_tx();
+  inject_text("ARM\r\nRAW L 100 600\r\n");
+  sc_bt_bench_service(60u);
+  CHECK(tx_equals(1u, "OK RAW PARAM=UNVERIFIED\r\n"));
+  fake_bench_clear_tx();
+  fake_bench_clear_calls();
+
+  sc_bt_bench_service(70u);
+  sc_bt_bench_service(90u);
+  CHECK(fake_bench_tx_count() == 0u);
+  sc_bt_bench_service(100u);
+  CHECK(fake_bench_tx_count() == 1u);
+  CHECK(tx_equals(0u, "ERR FEEDBACK\r\n"));
+  CHECK(fake_bench_last_standby_enable() == 0u);
+  CHECK(fake_bench_tb_state()->mode == SC_TB6612_MODE_STANDBY);
+  CHECK(export_capture_fault_mask(110u, &fault_mask) == 1);
+  CHECK((fault_mask & (1u << 1)) != 0u);
   return 0;
 }
 
@@ -1518,10 +1650,15 @@ static const test_case_t s_tests[] = {
   {"uart_io_failure_safe_stop", test_uart_io_failure_safe_stop},
   {"driver_failure_safe_stop", test_driver_failure_safe_stop},
   {"tx_full_stop_still_safe", test_tx_full_stop_still_safe},
+  {"raw_requires_fresh_feedback", test_raw_requires_fresh_feedback},
   {"raw_requires_arm_and_limits", test_raw_requires_arm_and_limits},
   {"raw_stall_zero_progress", test_raw_stall_zero_progress},
   {"raw_stall_jitter_keeps_window", test_raw_stall_jitter_keeps_window},
+  {"raw_stall_five_per_window_fails", test_raw_stall_five_per_window_fails},
   {"raw_stall_real_progress_passes", test_raw_stall_real_progress_passes},
+  {"raw_feedback_lost_sync_stops", test_raw_feedback_lost_sync_stops},
+  {"raw_feedback_sequence_freeze_stops",
+   test_raw_feedback_sequence_freeze_stops},
   {"speed_requires_arm_and_feedback",
    test_speed_requires_arm_and_feedback},
   {"speed_closed_loop_auto_stop", test_speed_closed_loop_auto_stop},

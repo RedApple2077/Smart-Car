@@ -525,6 +525,54 @@ try {
 '@ `
     -TestName "capture_100hz_two_seconds"
 
+  Invoke-Mutant -Name "raw_start_feedback_bypass" `
+    -Original @'
+  if (sc_bt_bench_feedback_ready(now_ms) == 0u)
+  {
+    s_last_fault_bits |= SC_BT_BENCH_FAULT_FEEDBACK;
+    sc_bt_bench_command_error("ERR FEEDBACK\r\n");
+    return;
+  }
+
+  left = ((side_mask & SC_SPEED_CONTROLLER_SIDE_LEFT) != 0u) ?
+'@ `
+    -Replacement @'
+  if (0)
+  {
+    s_last_fault_bits |= SC_BT_BENCH_FAULT_FEEDBACK;
+    sc_bt_bench_command_error("ERR FEEDBACK\r\n");
+    return;
+  }
+
+  left = ((side_mask & SC_SPEED_CONTROLLER_SIDE_LEFT) != 0u) ?
+'@ `
+    -TestName "raw_requires_fresh_feedback"
+
+  Invoke-Mutant -Name "runtime_feedback_monitor_disabled" `
+    -Original @'
+  if ((s_motor_active != 0u) &&
+      ((s_experiment_mode == SC_BT_BENCH_EXPERIMENT_RAW) ||
+       (s_experiment_mode == SC_BT_BENCH_EXPERIMENT_SPEED)) &&
+      ((feedback_update_ok == 0u) ||
+       (sc_bt_bench_feedback_ready(now_ms) == 0u)))
+  {
+    sc_bt_bench_feedback_fault(now_ms);
+    return;
+  }
+'@ `
+    -Replacement @'
+  if ((s_motor_active != 0u) && 0 &&
+      ((s_experiment_mode == SC_BT_BENCH_EXPERIMENT_RAW) ||
+       (s_experiment_mode == SC_BT_BENCH_EXPERIMENT_SPEED)) &&
+      ((feedback_update_ok == 0u) ||
+       (sc_bt_bench_feedback_ready(now_ms) == 0u)))
+  {
+    sc_bt_bench_feedback_fault(now_ms);
+    return;
+  }
+'@ `
+    -TestName "raw_feedback_lost_sync_stops"
+
   Invoke-Mutant -Name "stall_monitor_disabled" `
     -Original @'
   if ((s_motor_active == 0u) ||
@@ -544,12 +592,12 @@ try {
 
   Invoke-Mutant -Name "raw_stall_threshold_too_low" `
     -Original @'
-#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 5
+#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 20
 '@ `
     -Replacement @'
-#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 1
+#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 5
 '@ `
-    -TestName "raw_stall_jitter_keeps_window"
+    -TestName "raw_stall_five_per_window_fails"
 
   Invoke-Mutant -Name "speed_stall_threshold_zero" `
     -Original @'

@@ -125,10 +125,10 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 200
 - I2C2/MPU6050/SSD1306：15/15，缺陷变体 13/13。
 - TB6612/编码器：24/24，缺陷变体 18/18。
 - LF04/线路语义：13/13，缺陷变体 11/11。
-- HC-05 Bench：46/46，缺陷变体 26/26。
+- HC-05 Bench：50/50，缺陷变体 28/28。
 - App：24/24，缺陷变体 10/10。
 - Telemetry：8/8，缺陷变体 5/5。
-- 全量 13 个主机测试套件共 186/186 通过。
+- 全量 13 个主机测试套件共 190/190 个基线测试。
 - Speed Controller、Bench、App、Track、Telemetry、Safety 通过主机 GCC `-fanalyzer`，无分析告警。
 - Debug、Release、Bench 均通过交叉编译。
 
@@ -138,7 +138,7 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 200
 |---|---:|---:|---|
 | Debug | `5192 B` | `58804 B` | `0 B` / `0 B` |
 | Release | `5184 B` | `31424 B` | `0 B` / `0 B` |
-| Bench | `12552 B` | `62056 B` | `+72 B` / `+2448 B` |
+| Bench | `12552 B` | `62208 B` | `+72 B` / `+2600 B` |
 
 资源差值为第四阶段相对上一版的变化。Release ELF 含 `sc_app_*`、`sc_telemetry_*`、`sc_safety_iwdg_*`，不含 CAPTURE 缓冲、RX 命令解析、`sc_bt_bench_*` 或 `RAW/SPEED/PID/CAPTURE` 命令字符串；Bench ELF 保留完整调参命令与捕获缓冲。
 
@@ -160,7 +160,7 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 200
 - 烧录前必须物理断开电池；烧录完成后移除 ST-Link，再接入电池运行。
 - 电机动力线不得带电热插拔。
 - 首次运动测试必须使驱动轮悬空，并保持电池开关随手可断。
-- Bench 运动命令有 ARM、100..2000 ms 限时、RAW `±564`、SPEED `±500 mm/s` 和 STBY 安全停机；RAW/SPEED 支持单侧或双轮 B。`|实际TB命令|>=150` 时执行 300 ms 滚动净进展检查：RAW 至少净增 5 个物理计数，SPEED 至少达到按目标、轮径和 CPR 计算理论计数的 20%，否则 `ERR STALL`、锁存堵转 fault 并记录 CAPTURE。测试必须抬轮并保持电池开关随手可断。
+- Bench 运动命令有 ARM、100..2000 ms 限时、RAW `±564`、SPEED `±500 mm/s` 和 STBY 安全停机；RAW/SPEED 均要求双轮 feedback 有效且样本不超过 30 ms，并支持单侧或双轮 B。运行中任一侧 invalid、lost_sync 或样本年龄超过 30 ms时立即记录 FEEDBACK fault、保存 CAPTURE、拉低 STBY 并返回 `ERR FEEDBACK`。`|实际TB命令|>=150` 时执行 300 ms 滚动净进展检查：RAW 至少净增 20 个物理计数，这是尚未经过台架标定的保守安全门槛；SPEED 至少达到按目标、轮径和 CPR 计算理论计数的 20%。不足时 `ERR STALL`、锁存堵转 fault 并记录 CAPTURE。测试必须抬轮并保持电池开关随手可断。
 - IWDG 只在核心采样、状态推进、安全提交和必要 Service 完成后喂狗；受控 App FAULT 循环继续喂狗，不自动重启，恢复运动必须由下一次完整短按触发。
 - IWDG 初始化先写 `0xCCCC` 启动 LSI，再解锁并写 PR/RLR；更新位等待有固定上限，超时使正式与 Bench 启动进入紧急停机和 `Error_Handler`。
 - 丢线、线路无效、反馈超过 30 ms、控制失败和主循环间隔超过 100 ms属于可恢复 FAULT；TB6612/HAL/方向持续错误属于 FATAL，必须断电重启。

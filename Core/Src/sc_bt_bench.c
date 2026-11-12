@@ -37,7 +37,7 @@
 #define SC_BT_BENCH_CAPTURE_EXPORT_MAX 3u
 #define SC_BT_BENCH_STALL_PWM_PERMILLE 150
 #define SC_BT_BENCH_STALL_TIME_MS      300u
-#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 5
+#define SC_BT_BENCH_STALL_RAW_MIN_COUNT 20
 #define SC_BT_BENCH_STALL_PROGRESS_DIVISOR 5u
 #define SC_BT_BENCH_FAULT_TB         (1u << 0)
 #define SC_BT_BENCH_FAULT_FEEDBACK   (1u << 1)
@@ -570,13 +570,23 @@ static uint8_t sc_bt_bench_update_feedback(uint32_t now_ms)
   return 1u;
 }
 
-static uint8_t sc_bt_bench_speed_feedback_fresh(uint32_t now_ms)
+static uint8_t sc_bt_bench_feedback_ready(uint32_t now_ms)
 {
   return (uint8_t)(
     (s_wheel_ready != 0u) &&
     (s_wheel.valid != 0u) &&
+    (s_wheel.left_valid != 0u) &&
+    (s_wheel.right_valid != 0u) &&
     ((uint32_t)(now_ms - s_wheel.sample_time_ms) <=
      SC_WHEEL_MAX_SNAPSHOT_AGE_MS));
+}
+
+static void sc_bt_bench_feedback_fault(uint32_t now_ms)
+{
+  s_last_fault_bits |= SC_BT_BENCH_FAULT_FEEDBACK;
+  sc_bt_bench_capture_sample(now_ms);
+  (void)sc_bt_bench_safe_stop();
+  sc_bt_bench_send("ERR FEEDBACK\r\n");
 }
 
 static uint8_t sc_bt_bench_monitor_stall(uint32_t now_ms)
@@ -1254,6 +1264,12 @@ static void sc_bt_bench_handle_raw(const char **tokens,
     sc_bt_bench_command_error("ERR ARM\r\n");
     return;
   }
+  if (sc_bt_bench_feedback_ready(now_ms) == 0u)
+  {
+    s_last_fault_bits |= SC_BT_BENCH_FAULT_FEEDBACK;
+    sc_bt_bench_command_error("ERR FEEDBACK\r\n");
+    return;
+  }
 
   left = ((side_mask & SC_SPEED_CONTROLLER_SIDE_LEFT) != 0u) ?
     (int16_t)pwm : 0;
@@ -1310,7 +1326,7 @@ static void sc_bt_bench_handle_speed(const char **tokens,
     return;
   }
   if ((s_speed_ready == 0u) ||
-      (sc_bt_bench_speed_feedback_fresh(now_ms) == 0u))
+      (sc_bt_bench_feedback_ready(now_ms) == 0u))
   {
     s_last_fault_bits |= SC_BT_BENCH_FAULT_FEEDBACK;
     sc_bt_bench_command_error("ERR FEEDBACK\r\n");
@@ -1512,12 +1528,9 @@ static void sc_bt_bench_service_motion(uint32_t now_ms)
   {
     return;
   }
-  if (sc_bt_bench_speed_feedback_fresh(now_ms) == 0u)
+  if (sc_bt_bench_feedback_ready(now_ms) == 0u)
   {
-    s_last_fault_bits |= SC_BT_BENCH_FAULT_FEEDBACK;
-    sc_bt_bench_capture_sample(now_ms);
-    (void)sc_bt_bench_safe_stop();
-    sc_bt_bench_send("ERR FEEDBACK\r\n");
+    sc_bt_bench_feedback_fault(now_ms);
     return;
   }
   if (s_feedback_updated == 0u)
@@ -1734,6 +1747,7 @@ void sc_bt_bench_service(uint32_t now_ms)
   size_t total_received = 0u;
   size_t index;
   uint8_t activity = 0u;
+  uint8_t feedback_update_ok;
   sc_tb6612_state_t tb;
   sc_tb6612_status_t stop_status;
 
@@ -1755,15 +1769,24 @@ void sc_bt_bench_service(uint32_t now_ms)
     return;
   }
 
-  if (sc_bt_bench_update_feedback(now_ms) == 0u)
+  feedback_update_ok = sc_bt_bench_update_feedback(now_ms);
+  if ((s_motor_active != 0u) &&
+      ((s_experiment_mode == SC_BT_BENCH_EXPERIMENT_RAW) ||
+       (s_experiment_mode == SC_BT_BENCH_EXPERIMENT_SPEED)) &&
+      ((feedback_update_ok == 0u) ||
+       (sc_bt_bench_feedback_ready(now_ms) == 0u)))
   {
-    if (s_motor_active != 0u)
-    {
-      s_last_fault_bits |= SC_BT_BENCH_FAULT_FEEDBACK;
-      (void)sc_bt_bench_safe_stop();
-      sc_bt_bench_send("ERR IO\r\n");
-      activity = 1u;
-    }
+    sc_bt_bench_feedback_fault(now_ms);
+    return;
+  }
+  if ((s_motor_active != 0u) &&
+      (s_experiment_mode == SC_BT_BENCH_EXPERIMENT_MOTOR) &&
+      (feedback_update_ok == 0u))
+  {
+    s_last_fault_bits |= SC_BT_BENCH_FAULT_FEEDBACK;
+    (void)sc_bt_bench_safe_stop();
+    sc_bt_bench_send("ERR IO\r\n");
+    return;
   }
 
   if ((s_motor_active != 0u) &&
