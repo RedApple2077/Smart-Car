@@ -33,15 +33,27 @@ typedef struct {
   volatile uint32_t CCR2;
 } TIM_TypeDef;
 
+typedef struct {
+  volatile uint32_t KR;
+  volatile uint32_t PR;
+  volatile uint32_t RLR;
+  volatile uint32_t SR;
+} IWDG_TypeDef;
+
+#define IWDG_SR_PVU (1u << 0)
+#define IWDG_SR_RVU (1u << 1)
+
 extern RCC_TypeDef fake_rcc;
 extern GPIO_TypeDef fake_gpio_a;
 extern GPIO_TypeDef fake_gpio_b;
 extern TIM_TypeDef fake_tim4;
+extern IWDG_TypeDef fake_iwdg;
 
 #define RCC (&fake_rcc)
 #define GPIOA (&fake_gpio_a)
 #define GPIOB (&fake_gpio_b)
 #define TIM4 (&fake_tim4)
+#define IWDG (&fake_iwdg)
 
 void __DSB(void);
 

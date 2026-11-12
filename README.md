@@ -17,23 +17,33 @@ MPU6050、SSD1306 OLED 和 HC-05 属于可选辅助/遥测通道。完整硬件�
 
 ## 当前状态
 
-截至 2026-11-13，基础外设驱动、非阻塞服务层、四路离散循迹和双轮速度控制模块已经完成。速度控制尚未接入主循环或 Bench，默认标定和 PID 均为未验证占位。完整实车调试证据见[循迹调试日志](docs/循迹调试日志.md)，速度控制状态见[实现与实验记录](docs/双轮速度控制实现与实验记录.md)。
+截至 2026-11-13，正式闭环主链已接入 `sc_app`：
+
+```text
+10 ms LF04 -> 线路语义 -> 循迹 mm/s 目标
+  -> 10 ms Wheel Service 滑窗反馈 -> 双轮 PID
+  -> sc_app 安全提交 -> TB6612
+```
+
+正式 Debug/Release 构建只通过 `sc_app` 提交 TB6612 的 PWM 与 STBY，HC-05 入站接收关闭；Bench 固件保留原有台架命令，并同样启用 IWDG。默认标定和 PID 仍是未验证占位，`SC_MOTOR_CALIBRATION_VALID=0`、`SC_MOTOR_TUNING_VALID=0`，因此正式固件上电固定停在 IDLE，不会因默认参数自动发车。完整实车边界见[循迹调试日志](docs/循迹调试日志.md)，控制与实验状态见[实现与实验记录](docs/双轮速度控制实现与实验记录.md)。
 
 | 模块 | 当前状态 |
 |---|---|
 | 时钟、GPIO、I2C2、TIM2/TIM3/TIM4、USART2 | CubeMX/HAL 初始化完成 |
 | `sc_uart` | HC-05/USART2 9600 8N1 非阻塞收发、可选 RX、环形缓冲、错误与溢出统计完成 |
 | `sc_button` | 上电稳定态、事件配对、消抖与长按完成 |
-| `sc_safety` | 故障入口寄存器级紧急停机完成 |
+| `sc_safety` | 寄存器级紧急停机；IWDG 先启动 LSI，再有界等待配置更新；`/64`、重装 312、名义 0.4992 s |
 | `sc_i2c2`、`sc_mpu6050`、`sc_ssd1306` | 共享 I2C2 事务、MPU6050 异步采样/校零、OLED 分块刷新完成 |
 | `sc_tb6612`、`sc_encoder` | 双路 PWM、方向、安全待机、TIM2/TIM3 正交计数、回绕与失同步处理完成 |
 | `sc_lf04`、`sc_line_service` | PB12-PB15 原始采样、黑线掩码和 16 种线路语义完成 |
 | `sc_led` | 状态 LED 驱动完成 |
 | `sc_bt_bench` | 独立 Bench 固件的 HC-05 台架命令层完成；正式固件不链接 |
-| `sc_track`、正式循迹入口 | 已实现四路差速循迹、1000 ms 丢线找回、十字直行、短按发车和长按停止 |
-| `sc_wheel_service`、`sc_pid`、`sc_speed_controller` | 模块与主机测试完成；尚未接入主循环、循迹或 Bench |
+| `sc_track` | 四路比例策略输出 `mm/s`、发车资格、1000 ms 方向找回、三帧/20 ms 重捕完成 |
+| `sc_wheel_service`、`sc_pid`、`sc_speed_controller` | 约 50 ms 滑窗测速、并联 PID 与双轮速度闭环已接入正式主循环 |
+| `sc_app` | BOOT/IDLE/READY/ACTIVE/STOPPING/FAULT、启动门、故障恢复、堵转/方向保护和唯一执行器提交完成 |
+| `sc_telemetry` | HC-05 `9600 8N1`、5 Hz 紧凑 CSV、2 Hz OLED、状态 LED 完成 |
 
-正式 Debug/Release 固件保持静默，不接受蓝牙运动命令。电机台架控制仅存在于独立 `Bench` 固件。
+正式 Debug/Release 固件只发送只读遥测，不启用入站接收，也不包含蓝牙运动命令。电机台架控制仅存在于独立 `Bench` 固件。
 
 ## 硬件基线
 
@@ -101,17 +111,30 @@ pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action DirectionMatrix -ExecuteMotion
 
 - UART 主机回归：13/13，缺陷变体 3/3。
 - 按键主机回归：3/3，缺陷变体 1/1。
-- 紧急停机寄存器主机回归：1/1。
+- Safety：3/3，缺陷变体 1/1；覆盖紧急停机和 IWDG 更新超时。
 - Wheel Service：8/8，缺陷变体 6/6。
 - PID：6/6，缺陷变体 4/4。
 - 双轮速度控制：9/9，缺陷变体 6/6。
+- 循迹目标策略：13/13，缺陷变体 7/7。
 - I2C2/MPU6050/SSD1306：15/15，缺陷变体 13/13。
 - TB6612/编码器：24/24，缺陷变体 18/18。
 - LF04/线路语义：13/13，缺陷变体 11/11。
 - HC-05 Bench：31/31，缺陷变体 13/13。
-- 新模块通过主机 GCC `-fanalyzer`。
-- Debug、Release、Bench 均完成交叉编译和链接。
-- 正式 ELF 不含 `sc_bt_bench` 符号或 Bench 协议字符串，HAL 回调无重复。
+- App：24/24，缺陷变体 10/10。
+- Telemetry：8/8，缺陷变体 5/5。
+- 全量 13 个主机测试套件共 170/170 通过。
+- App、Track、Telemetry、Safety 通过主机 GCC `-fanalyzer`，无分析告警。
+- Debug、Release、Bench 均通过交叉编译。
+
+最终资源占用：
+
+| 预设 | RAM | Flash | 相对 HEAD `9b10d86` |
+|---|---:|---:|---|
+| Debug | `5192 B` | `58804 B` | `+984 B` / `+16836 B` |
+| Release | `5184 B` | `31424 B` | `+992 B` / `+8560 B` |
+| Bench | `4496 B` | `47724 B` | `0 B` / `+176 B` |
+
+Release ELF 含 `sc_app_*`、`sc_telemetry_*`、`sc_safety_iwdg_*`，不含 `sc_bt_bench_*` 符号或 `OK PONG`/`OK MOTOR` 等台架命令字符串；Bench ELF 保留 `sc_bt_bench_*` 和命令字符串。资源差值相对分支起点 HEAD，包含当前未提交的循迹目标重构与正式 App/Telemetry 接入。
 
 已完成的硬件台架项：
 
@@ -122,7 +145,7 @@ pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action DirectionMatrix -ExecuteMotion
 尚未验证：
 
 - LF04 白底/黑线极性、逐路响应、O1-O4 左右顺序、中心直行与十字直行已完成实物验证；探头约 3 cm 安装高度与完整赛道仍需复测。
-- 双轮速度闭环、实际车速、轮径/每转计数标定仍未验证；当前循迹使用开环 PWM 差速。
+- 双轮速度闭环代码已接入，但实际车速、轮径/每转计数、电机符号和 PID 参数仍未实车标定；默认有效位保持 0。
 - 堵转电流、温升、长时间运行、满电负载供电和完整赛道表现未验证。
 
 ## 安全约束
@@ -132,6 +155,13 @@ pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action DirectionMatrix -ExecuteMotion
 - 电机动力线不得带电热插拔。
 - 首次运动测试必须使驱动轮悬空，并保持电池开关随手可断。
 - Bench 运动命令只有限时、单轮、低占空比控制，不能替代应用安全门和速度闭环。
+- IWDG 只在核心采样、状态推进、安全提交和必要 Service 完成后喂狗；受控 App FAULT 循环继续喂狗，不自动重启，恢复运动必须由下一次完整短按触发。
+- IWDG 初始化先写 `0xCCCC` 启动 LSI，再解锁并写 PR/RLR；更新位等待有固定上限，超时使正式与 Bench 启动进入紧急停机和 `Error_Handler`。
+- 丢线、线路无效、反馈超过 30 ms、控制失败和主循环间隔超过 100 ms属于可恢复 FAULT；TB6612/HAL/方向持续错误属于 FATAL，必须断电重启。
+- 找线重捕必须连续 3 个新鲜样本、中间不得出现白帧/重复 sequence/零时差/超过 30 ms 间隔；首次白帧锁存的 1000 ms 总期限不会重开。
+- 单轮堵转使用 300 ms 固定窗口净进展，达到目标理论计数的 20% 才通过；单帧 `+1` 抖动不能重置窗口。
+- 方向 FATAL 仅在目标与控制器命令同号且物理计数反向时累计。正目标下的负 PWM 控制/制动不单独构成方向故障。
+- 可恢复故障只有在线路非白后才有健康时间；`LINE_LOST` 还要求重新看到中心 `0x06` 并完成稳定窗口。OLED 异步重试错误同样只置显示降级。
 
 ## 测试
 
@@ -144,11 +174,11 @@ cmake --build build/host-sc-line
 ctest --test-dir build/host-sc-line --output-on-failure
 ```
 
-其余回归目录为 `tests/sc_uart`、`tests/sc_i2c2`、`tests/sc_motor` 和 `tests/sc_bt_bench`。缺陷对照脚本位于对应测试目录的 `run_mutant_tests.ps1`。
+其余回归目录包括 `tests/sc_uart`、`tests/sc_i2c2`、`tests/sc_motor`、`tests/sc_track`、`tests/sc_wheel_service`、`tests/sc_pid`、`tests/sc_speed_controller`、`tests/sc_app`、`tests/sc_telemetry` 和 `tests/sc_bt_bench`。缺陷对照脚本位于对应测试目录的 `run_mutant_tests.ps1`。
 
 ## 后续工作
 
-1. 接入 Wheel Service，并在实车确认左右编码器方向、1040 count/rev 和 48 mm 轮径。
-2. 接入双轮速度闭环，按受控实验流程完成低速 PID 标定。
+1. 实现下一阶段 Bench 调参命令，再在抬轮受控实验中确认左右编码器方向、1040 count/rev、48 mm 轮径和电机符号。
+2. 记录开环阶跃与闭环响应，完成可追溯的低速 PID 实验；通过前保持两个 VALID 常量为 0。
 3. 在完整比赛赛道复测当前循迹参数，并固定 LF04 安装高度和阈值。
-4. 完成整车供电、长时间运行、温升和比赛赛道测试。
+4. 完成整车供电、长时间运行、温升、IWDG 复位可见性和比赛赛道测试。

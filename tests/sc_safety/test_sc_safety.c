@@ -2,6 +2,7 @@
 #include "stm32f1xx.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #define CHECK(expression)                                                     \
   do                                                                          \
@@ -44,7 +45,61 @@ static int test_emergency_stop_direct_registers(void)
   return 0;
 }
 
-int main(void)
+static int test_iwdg_configuration_and_feed(void)
 {
-  return test_emergency_stop_direct_registers();
+  fake_safety_reset();
+  CHECK(sc_safety_iwdg_init() == SC_SAFETY_OK);
+  CHECK(fake_iwdg.PR == 0x04u);
+  CHECK(fake_iwdg.RLR == 312u);
+  CHECK(fake_iwdg.KR == 0xAAAAu);
+
+  fake_iwdg.KR = 0u;
+  sc_safety_iwdg_feed();
+  CHECK(fake_iwdg.KR == 0xAAAAu);
+  fake_iwdg.KR = 0u;
+  CHECK(sc_safety_iwdg_init() == SC_SAFETY_OK);
+  CHECK(fake_iwdg.KR == 0xAAAAu);
+  return 0;
+}
+
+static int test_iwdg_timeout(void)
+{
+  fake_safety_reset();
+  fake_iwdg.SR = IWDG_SR_PVU | IWDG_SR_RVU;
+
+  CHECK(sc_safety_iwdg_init() == SC_SAFETY_ERR_IWDG_TIMEOUT);
+  CHECK(fake_iwdg.KR == 0xAAAAu);
+  CHECK(fake_iwdg.PR == 0x04u);
+  CHECK(fake_iwdg.RLR == 312u);
+  return 0;
+}
+
+typedef struct {
+  const char *name;
+  int (*run)(void);
+} test_case_t;
+
+static const test_case_t s_tests[] = {
+  {"emergency_stop_direct_registers",
+   test_emergency_stop_direct_registers},
+  {"iwdg_configuration_and_feed", test_iwdg_configuration_and_feed},
+  {"iwdg_timeout", test_iwdg_timeout}
+};
+
+int main(int argc, char **argv)
+{
+  size_t index;
+
+  if (argc != 2)
+  {
+    return 2;
+  }
+  for (index = 0u; index < (sizeof(s_tests) / sizeof(s_tests[0])); index++)
+  {
+    if (strcmp(argv[1], s_tests[index].name) == 0)
+    {
+      return s_tests[index].run();
+    }
+  }
+  return 2;
 }

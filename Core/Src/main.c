@@ -21,6 +21,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#if !SC_BUILD_HC05_BENCH
+#include "sc_app.h"
+#include "sc_telemetry.h"
+#endif
 #include "sc_button.h"
 #if SC_BUILD_HC05_BENCH
 #include "sc_bt_bench.h"
@@ -32,8 +36,9 @@
 #include "sc_mpu6050.h"
 #include "sc_safety.h"
 #include "sc_ssd1306.h"
+#if SC_BUILD_HC05_BENCH
 #include "sc_tb6612.h"
-#include "sc_track.h"
+#endif
 #include "sc_uart.h"
 /* USER CODE END Includes */
 
@@ -63,12 +68,8 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 #if !SC_BUILD_HC05_BENCH
-static uint8_t s_tracking_active;
-static uint32_t s_tracking_start_ms;
-static int64_t s_tracking_start_left_count;
-static int64_t s_tracking_start_right_count;
-static sc_track_controller_t s_track_controller;
-static uint8_t s_button_press_seen;
+static sc_app_t s_app;
+static sc_app_config_t s_app_config;
 #endif
 
 /* USER CODE END PV */
@@ -87,105 +88,6 @@ static void MX_USART2_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-#if !SC_BUILD_HC05_BENCH
-#define SC_TRACK_MOTION_TIMEOUT_MS 2000u
-
-static void sc_tracking_stop(void)
-{
-  s_tracking_active = 0u;
-  (void)sc_tb6612_set_standby(0u);
-}
-
-static void sc_tracking_service(uint32_t now_ms, uint8_t button_events)
-{
-  sc_line_state_t line;
-  sc_encoder_snapshot_t encoder;
-  sc_track_command_t command;
-  sc_track_status_t track_status;
-
-  if ((button_events & SC_BUTTON_EVENT_LONG_PRESS) != 0u)
-  {
-    s_button_press_seen = 0u;
-    sc_tracking_stop();
-    return;
-  }
-
-  if (((button_events & SC_BUTTON_EVENT_PRESSED) != 0u) &&
-      (s_tracking_active == 0u))
-  {
-    s_button_press_seen = 1u;
-  }
-
-  if (s_tracking_active == 0u)
-  {
-    if ((button_events & SC_BUTTON_EVENT_RELEASED) == 0u)
-    {
-      return;
-    }
-    if (s_button_press_seen == 0u)
-    {
-      return;
-    }
-    s_button_press_seen = 0u;
-    sc_track_controller_init(&s_track_controller);
-    if ((sc_line_service_get_latest(&line) != SC_LINE_OK) ||
-        (sc_encoder_get_latest(&encoder) != SC_ENCODER_OK) ||
-        (encoder.valid == 0u))
-    {
-      sc_tracking_stop();
-      return;
-    }
-    track_status = sc_track_controller_step(&s_track_controller, &line,
-                                            now_ms, &command);
-    if ((track_status != SC_TRACK_OK) &&
-        (track_status != SC_TRACK_RECOVERING))
-    {
-      sc_tracking_stop();
-      return;
-    }
-    if (
-        (sc_tb6612_set_standby(1u) != SC_TB6612_OK))
-    {
-      sc_tracking_stop();
-      return;
-    }
-    s_tracking_active = 1u;
-    s_tracking_start_ms = now_ms;
-    s_tracking_start_left_count = encoder.left.total_count;
-    s_tracking_start_right_count = encoder.right.total_count;
-  }
-
-  if ((sc_line_service_get_latest(&line) != SC_LINE_OK) ||
-      (sc_encoder_get_latest(&encoder) != SC_ENCODER_OK) ||
-      (encoder.valid == 0u))
-  {
-    sc_tracking_stop();
-    return;
-  }
-  track_status = sc_track_controller_step(&s_track_controller, &line,
-                                          now_ms, &command);
-  if ((track_status != SC_TRACK_OK) &&
-      (track_status != SC_TRACK_RECOVERING))
-  {
-    sc_tracking_stop();
-    return;
-  }
-  if (((uint32_t)(now_ms - s_tracking_start_ms) >=
-       SC_TRACK_MOTION_TIMEOUT_MS) &&
-      ((encoder.left.total_count == s_tracking_start_left_count) &&
-       (encoder.right.total_count == s_tracking_start_right_count)))
-  {
-    sc_tracking_stop();
-    return;
-  }
-  if (sc_tb6612_apply(command.left_permille, command.right_permille) !=
-      SC_TB6612_OK)
-  {
-    sc_tracking_stop();
-  }
-}
-#endif
 
 /* USER CODE END 0 */
 
@@ -226,40 +128,55 @@ int main(void)
   /* USER CODE BEGIN 2 */
   /* CubeMX 生成的 MX_USART2_UART_Init() 是平台启动前提，失败由生成函数进入
      Error_Handler；正式固件不挂接收，只有 Bench 固件启用 HC-05 入站。 */
+
 #if SC_BUILD_HC05_BENCH
-  (void)sc_uart_init(9600u, 1u);
-#else
-  (void)sc_uart_init(9600u, 0u);
-#endif
-
-  /* PB5 上拉输入、PB9 推挽输出；STBY/PWM/方向脚已由 MX_GPIO_Init 置为安全电平。 */
-  if (sc_led_init() != SC_LED_OK)
-  {
-    Error_Handler();
-  }
-  if (sc_button_init() != SC_BUTTON_OK)
-  {
-    Error_Handler();
-  }
-
-  /* TB6612 初始化后保持 STBY 低，短按按键才允许进入循迹。 */
-  if ((sc_tb6612_init() != SC_TB6612_OK) ||
+  /* Bench 保持原有台架初始化与命令行为。 */
+  if ((sc_led_init() != SC_LED_OK) ||
+      (sc_button_init() != SC_BUTTON_OK) ||
+      (sc_tb6612_init() != SC_TB6612_OK) ||
       (sc_encoder_init() != SC_ENCODER_OK) ||
       (sc_lf04_init() != SC_LF04_OK))
   {
     Error_Handler();
   }
-
-#if SC_BUILD_HC05_BENCH
+  (void)sc_uart_init(9600u, 1u);
   sc_bt_bench_init(HAL_GetTick());
-#endif
-
-  /* MPU6050 与 OLED 都是辅助设备；失败只降级对应模块。 */
   if (sc_mpu6050_init() == SC_MPU6050_OK)
   {
     (void)sc_mpu6050_start_calibration(128u);
   }
   (void)sc_ssd1306_init();
+#else
+  sc_app_get_default_config(&s_app_config);
+  if (sc_app_init(&s_app, &s_app_config, HAL_GetTick()) != SC_APP_OK)
+  {
+    sc_safety_emergency_stop();
+  }
+  if (sc_uart_init(9600u, 0u) != SC_UART_OK)
+  {
+    (void)sc_app_report_degraded(&s_app, SC_APP_DEGRADED_TELEMETRY);
+  }
+  if (sc_mpu6050_init() == SC_MPU6050_OK)
+  {
+    if (sc_mpu6050_start_calibration(128u) != SC_MPU6050_OK)
+    {
+      (void)sc_app_report_degraded(&s_app, SC_APP_DEGRADED_IMU);
+    }
+  }
+  else
+  {
+    (void)sc_app_report_degraded(&s_app, SC_APP_DEGRADED_IMU);
+  }
+  if (sc_ssd1306_init() != SC_SSD1306_OK)
+  {
+    (void)sc_app_report_degraded(&s_app, SC_APP_DEGRADED_DISPLAY);
+  }
+  sc_telemetry_init(HAL_GetTick());
+#endif
+  if (sc_safety_iwdg_init() != SC_SAFETY_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -270,6 +187,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     uint32_t now_ms = HAL_GetTick();
+#if SC_BUILD_HC05_BENCH
     sc_line_sample_t line_sample = {
       .raw_levels = 0u,
       .sample_time_ms = now_ms,
@@ -283,16 +201,32 @@ int main(void)
       line_sample.valid = 0u;
     }
     (void)sc_line_service_update(&line_sample);
-
-    sc_encoder_service(now_ms);
-#if SC_BUILD_HC05_BENCH
+    (void)sc_encoder_service(now_ms);
     sc_bt_bench_service(now_ms);
-#else
-    sc_tracking_service(now_ms, sc_button_poll(now_ms));
-#endif
     sc_mpu6050_service(now_ms);
     sc_ssd1306_service(now_ms);
     sc_uart_service();
+#else
+    sc_app_snapshot_t snapshot;
+    uint32_t degraded_bits = 0u;
+
+    (void)sc_app_service(&s_app, now_ms);
+    if (sc_app_snapshot(&s_app, &snapshot) == SC_APP_OK)
+    {
+      (void)sc_telemetry_service(&snapshot, now_ms, &degraded_bits);
+      if (degraded_bits != 0u)
+      {
+        (void)sc_app_report_degraded(&s_app, degraded_bits);
+      }
+    }
+    else
+    {
+      sc_safety_emergency_stop();
+    }
+    sc_mpu6050_service(now_ms);
+    sc_uart_service();
+#endif
+    sc_safety_iwdg_feed();
   }
   /* USER CODE END 3 */
 }

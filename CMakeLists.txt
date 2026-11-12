@@ -49,6 +49,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_button.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_encoder.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_i2c2.c
@@ -61,6 +62,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_speed_controller.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_ssd1306.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_tb6612.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_telemetry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_track.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_uart.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sc_wheel_service.c

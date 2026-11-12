@@ -1,95 +1,104 @@
 /**
   ******************************************************************************
   * @file    sc_track.c
-  * @brief   四路红外离散循迹的低速差速控制策略实现。
+  * @brief   四路红外离散循迹的轮速目标策略实现。
   ******************************************************************************
   */
 
 #include "sc_track.h"
 
+#include <limits.h>
 #include <stddef.h>
 
-#define SC_TRACK_SPEED_SCALE_NUM         3817
-#define SC_TRACK_SPEED_SCALE_DEN         2500
-#define SC_TRACK_SCALE(value) \
-  (((value) * SC_TRACK_SPEED_SCALE_NUM) / SC_TRACK_SPEED_SCALE_DEN)
+#define SC_TRACK_RATIO_SCALE          1000
+#define SC_TRACK_CENTER_RATIO         1000
+#define SC_TRACK_FINE_INNER_RATIO     558
+#define SC_TRACK_FINE_OUTER_RATIO     1328
+#define SC_TRACK_MEDIUM_INNER_RATIO   268
+#define SC_TRACK_MEDIUM_OUTER_RATIO   1386
+#define SC_TRACK_TURN_INNER_RATIO     0
+#define SC_TRACK_TURN_OUTER_RATIO     1424
+#define SC_TRACK_SEARCH_INNER_RATIO   76
+#define SC_TRACK_SEARCH_OUTER_RATIO   1194
+#define SC_TRACK_LOST_RECOVERY_MS     1000u
+#define SC_TRACK_RECOVERY_SAMPLES     3u
+#define SC_TRACK_RECOVERY_MIN_TIME_MS 20u
+#define SC_TRACK_RECOVERY_MAX_GAP_MS  30u
 
-/* All motion cases use the same scale factor to preserve steering ratios. */
-#define SC_TRACK_FORWARD_PERMILLE       SC_TRACK_SCALE(260)
-/* At the higher cruise speed, widen the differential response by error size.
-   This returns the line to the O2/O3 center more quickly. */
-#define SC_TRACK_FINE_INNER_PERMILLE    SC_TRACK_SCALE(145)
-#define SC_TRACK_FINE_OUTER_PERMILLE    SC_TRACK_SCALE(345)
-#define SC_TRACK_MEDIUM_INNER_PERMILLE  SC_TRACK_SCALE(70)
-#define SC_TRACK_MEDIUM_OUTER_PERMILLE  SC_TRACK_SCALE(360)
-#define SC_TRACK_TURN_INNER_PERMILLE    0
-#define SC_TRACK_TURN_OUTER_PERMILLE    SC_TRACK_SCALE(370)
-/* A tight, low-forward-speed arc reacquires a nearby line before the car
-   can trace a large circle after a momentary all-white sample. */
-#define SC_TRACK_SEARCH_INNER_PERMILLE  SC_TRACK_SCALE(20)
-#define SC_TRACK_SEARCH_OUTER_PERMILLE  SC_TRACK_SCALE(310)
-#define SC_TRACK_LOST_RECOVERY_MS      1000u
-
-static void sc_track_set_command(sc_track_command_t *command,
-                                 int16_t left,
-                                 int16_t right)
+static int32_t sc_track_speed_limit(const sc_track_controller_t *controller)
 {
-  command->left_permille = left;
-  command->right_permille = right;
+  int64_t limit = (int64_t)controller->cruise_mm_s * 3;
+
+  return (limit > INT32_MAX) ? INT32_MAX : (int32_t)limit;
 }
 
-void sc_track_controller_init(sc_track_controller_t *controller)
+static int32_t sc_track_scaled_speed(const sc_track_controller_t *controller,
+                                     uint32_t ratio_permille)
+{
+  int64_t scaled =
+    (((int64_t)controller->cruise_mm_s * ratio_permille) +
+     (SC_TRACK_RATIO_SCALE / 2)) /
+    SC_TRACK_RATIO_SCALE;
+  int32_t limit = sc_track_speed_limit(controller);
+
+  if (scaled < 0)
+  {
+    return 0;
+  }
+  if (scaled > limit)
+  {
+    return limit;
+  }
+  return (int32_t)scaled;
+}
+
+static void sc_track_set_target(sc_track_controller_t *controller,
+                                uint32_t left_ratio,
+                                uint32_t right_ratio,
+                                sc_wheel_target_t *target_out)
+{
+  target_out->left_mm_s =
+    sc_track_scaled_speed(controller, left_ratio);
+  target_out->right_mm_s =
+    sc_track_scaled_speed(controller, right_ratio);
+}
+
+static void sc_track_clear_target(sc_wheel_target_t *target_out)
+{
+  target_out->left_mm_s = 0;
+  target_out->right_mm_s = 0;
+}
+
+static void sc_track_reset_recovery_candidate(
+  sc_track_controller_t *controller)
+{
+  controller->recovery_first_sample_time_ms = 0u;
+  controller->recovery_last_sample_time_ms = 0u;
+  controller->recovery_last_sequence = 0u;
+  controller->recovery_sample_count = 0u;
+  controller->recovery_has_sequence = 0u;
+}
+
+void sc_track_controller_init(sc_track_controller_t *controller,
+                              int32_t cruise_mm_s)
 {
   if (controller == NULL)
   {
     return;
   }
+  controller->cruise_mm_s = (cruise_mm_s > 0) ? cruise_mm_s : 0;
   controller->last_turn_direction = 0;
   controller->lost_since_ms = 0u;
   controller->recovering = 0u;
+  sc_track_reset_recovery_candidate(controller);
 }
 
-static void sc_track_finish_valid_sample(sc_track_controller_t *controller,
-                                         int8_t turn_direction)
+uint8_t sc_track_start_eligible(const sc_line_state_t *line)
 {
-  if (turn_direction != 0)
-  {
-    controller->last_turn_direction = turn_direction;
-  }
-  controller->recovering = 0u;
-}
-
-static sc_track_status_t sc_track_recover_lost_line(
-  sc_track_controller_t *controller, uint32_t now_ms,
-  sc_track_command_t *command)
-{
-  if (controller->recovering == 0u)
-  {
-    controller->recovering = 1u;
-    controller->lost_since_ms = now_ms;
-  }
-  if ((uint32_t)(now_ms - controller->lost_since_ms) >=
-      SC_TRACK_LOST_RECOVERY_MS)
-  {
-    return SC_TRACK_ERR_LOST;
-  }
-
-  if (controller->last_turn_direction < 0)
-  {
-    sc_track_set_command(command, SC_TRACK_SEARCH_INNER_PERMILLE,
-                         SC_TRACK_SEARCH_OUTER_PERMILLE);
-  }
-  else if (controller->last_turn_direction > 0)
-  {
-    sc_track_set_command(command, SC_TRACK_SEARCH_OUTER_PERMILLE,
-                         SC_TRACK_SEARCH_INNER_PERMILLE);
-  }
-  else
-  {
-    sc_track_set_command(command, SC_TRACK_FORWARD_PERMILLE,
-                         SC_TRACK_FORWARD_PERMILLE);
-  }
-  return SC_TRACK_RECOVERING;
+  return (uint8_t)(
+    (line != NULL) &&
+    (line->sample.valid != 0u) &&
+    (line->black_mask == 0x06u));
 }
 
 static int8_t sc_track_mask_direction(uint8_t black_mask)
@@ -116,105 +125,206 @@ static int8_t sc_track_mask_direction(uint8_t black_mask)
     ((weighted_position < 0) ? -1 : 0);
 }
 
-static sc_track_status_t sc_track_follow_ambiguous_mask(
-  sc_track_controller_t *controller, uint8_t black_mask,
-  sc_track_command_t *command)
+static sc_track_status_t sc_track_output_search(
+  sc_track_controller_t *controller, sc_wheel_target_t *target_out)
 {
-  int8_t turn_direction = sc_track_mask_direction(black_mask);
-
-  if (turn_direction < 0)
+  if (controller->last_turn_direction < 0)
   {
-    sc_track_set_command(command, SC_TRACK_FINE_INNER_PERMILLE,
-                         SC_TRACK_FINE_OUTER_PERMILLE);
+    sc_track_set_target(controller, SC_TRACK_SEARCH_INNER_RATIO,
+                        SC_TRACK_SEARCH_OUTER_RATIO, target_out);
   }
-  else if (turn_direction > 0)
+  else if (controller->last_turn_direction > 0)
   {
-    sc_track_set_command(command, SC_TRACK_FINE_OUTER_PERMILLE,
-                         SC_TRACK_FINE_INNER_PERMILLE);
+    sc_track_set_target(controller, SC_TRACK_SEARCH_OUTER_RATIO,
+                        SC_TRACK_SEARCH_INNER_RATIO, target_out);
   }
   else
   {
-    sc_track_set_command(command, SC_TRACK_FORWARD_PERMILLE,
-                         SC_TRACK_FORWARD_PERMILLE);
+    sc_track_clear_target(target_out);
+    return SC_TRACK_ERR_LOST;
   }
-  sc_track_finish_valid_sample(controller, turn_direction);
-  return SC_TRACK_OK;
+  return SC_TRACK_RECOVERING;
+}
+
+static sc_track_status_t sc_track_follow_ordinary(
+  sc_track_controller_t *controller, uint8_t black_mask,
+  sc_wheel_target_t *target_out)
+{
+  int8_t turn_direction;
+
+  switch (black_mask)
+  {
+    case 0x06u:
+    case 0x0Fu:
+      sc_track_set_target(controller, SC_TRACK_CENTER_RATIO,
+                          SC_TRACK_CENTER_RATIO, target_out);
+      controller->last_turn_direction = 0;
+      return SC_TRACK_OK;
+
+    case 0x02u:
+      sc_track_set_target(controller, SC_TRACK_FINE_INNER_RATIO,
+                          SC_TRACK_FINE_OUTER_RATIO, target_out);
+      controller->last_turn_direction = -1;
+      return SC_TRACK_OK;
+
+    case 0x04u:
+      sc_track_set_target(controller, SC_TRACK_FINE_OUTER_RATIO,
+                          SC_TRACK_FINE_INNER_RATIO, target_out);
+      controller->last_turn_direction = 1;
+      return SC_TRACK_OK;
+
+    case 0x03u:
+      sc_track_set_target(controller, SC_TRACK_MEDIUM_INNER_RATIO,
+                          SC_TRACK_MEDIUM_OUTER_RATIO, target_out);
+      controller->last_turn_direction = -1;
+      return SC_TRACK_OK;
+
+    case 0x0Cu:
+      sc_track_set_target(controller, SC_TRACK_MEDIUM_OUTER_RATIO,
+                          SC_TRACK_MEDIUM_INNER_RATIO, target_out);
+      controller->last_turn_direction = 1;
+      return SC_TRACK_OK;
+
+    case 0x01u:
+    case 0x07u:
+      sc_track_set_target(controller, SC_TRACK_TURN_INNER_RATIO,
+                          SC_TRACK_TURN_OUTER_RATIO, target_out);
+      controller->last_turn_direction = -1;
+      return SC_TRACK_OK;
+
+    case 0x08u:
+    case 0x0Eu:
+      sc_track_set_target(controller, SC_TRACK_TURN_OUTER_RATIO,
+                          SC_TRACK_TURN_INNER_RATIO, target_out);
+      controller->last_turn_direction = 1;
+      return SC_TRACK_OK;
+
+    default:
+      turn_direction = sc_track_mask_direction(black_mask);
+      if (turn_direction < 0)
+      {
+        sc_track_set_target(controller, SC_TRACK_FINE_INNER_RATIO,
+                            SC_TRACK_FINE_OUTER_RATIO, target_out);
+      }
+      else if (turn_direction > 0)
+      {
+        sc_track_set_target(controller, SC_TRACK_FINE_OUTER_RATIO,
+                            SC_TRACK_FINE_INNER_RATIO, target_out);
+      }
+      else
+      {
+        sc_track_set_target(controller, SC_TRACK_CENTER_RATIO,
+                            SC_TRACK_CENTER_RATIO, target_out);
+      }
+      controller->last_turn_direction = turn_direction;
+      return SC_TRACK_OK;
+  }
+}
+
+static uint8_t sc_track_recovery_confirm(
+  sc_track_controller_t *controller, const sc_line_state_t *line)
+{
+  uint8_t fresh =
+    (uint8_t)((controller->recovery_has_sequence == 0u) ||
+              (line->sample.sequence !=
+               controller->recovery_last_sequence));
+  uint32_t sample_gap_ms;
+
+  if (fresh == 0u)
+  {
+    sc_track_reset_recovery_candidate(controller);
+    return 0u;
+  }
+
+  if (controller->recovery_sample_count != 0u)
+  {
+    sample_gap_ms =
+      (uint32_t)(line->sample.sample_time_ms -
+                 controller->recovery_last_sample_time_ms);
+    if ((sample_gap_ms == 0u) ||
+        (sample_gap_ms > SC_TRACK_RECOVERY_MAX_GAP_MS))
+    {
+      sc_track_reset_recovery_candidate(controller);
+    }
+  }
+  if (controller->recovery_sample_count == 0u)
+  {
+    controller->recovery_first_sample_time_ms =
+      line->sample.sample_time_ms;
+  }
+  if (controller->recovery_sample_count < UINT8_MAX)
+  {
+    controller->recovery_sample_count++;
+  }
+  controller->recovery_last_sample_time_ms =
+    line->sample.sample_time_ms;
+  controller->recovery_last_sequence = line->sample.sequence;
+  controller->recovery_has_sequence = 1u;
+
+  if ((controller->recovery_sample_count >= SC_TRACK_RECOVERY_SAMPLES) &&
+      ((uint32_t)(line->sample.sample_time_ms -
+                  controller->recovery_first_sample_time_ms) >=
+       SC_TRACK_RECOVERY_MIN_TIME_MS))
+  {
+    controller->recovering = 0u;
+    sc_track_reset_recovery_candidate(controller);
+    return 1u;
+  }
+  return 0u;
 }
 
 sc_track_status_t sc_track_controller_step(sc_track_controller_t *controller,
                                            const sc_line_state_t *line,
                                            uint32_t now_ms,
-                                           sc_track_command_t *command)
+                                           sc_wheel_target_t *target_out)
 {
-  if ((controller == NULL) || (line == NULL) || (command == NULL))
+  if ((controller == NULL) || (line == NULL) || (target_out == NULL))
   {
     return SC_TRACK_ERR_ARGUMENT;
   }
 
-  sc_track_set_command(command, 0, 0);
+  sc_track_clear_target(target_out);
   if (line->sample.valid == 0u)
   {
+    sc_track_reset_recovery_candidate(controller);
     return SC_TRACK_ERR_INVALID_LINE;
   }
   if ((line->black_mask & 0xF0u) != 0u)
   {
+    sc_track_reset_recovery_candidate(controller);
     return SC_TRACK_ERR_INVALID_LINE;
   }
 
-  /* Use the bit mask directly so contiguous two-sensor coverage remains
-     steerable even though the generic semantic service labels it unknown. */
-  switch (line->black_mask)
+  if (controller->recovering != 0u)
   {
-    case 0x06u:
-    case 0x0Fu: /* Four sensors on black: crossroad, continue straight. */
-      sc_track_set_command(command, SC_TRACK_FORWARD_PERMILLE,
-                           SC_TRACK_FORWARD_PERMILLE);
-      sc_track_finish_valid_sample(controller, 0);
-      return SC_TRACK_OK;
+    if ((uint32_t)(now_ms - controller->lost_since_ms) >=
+        SC_TRACK_LOST_RECOVERY_MS)
+    {
+      sc_track_reset_recovery_candidate(controller);
+      return SC_TRACK_ERR_LOST;
+    }
 
-    case 0x02u:
-      sc_track_set_command(command, SC_TRACK_FINE_INNER_PERMILLE,
-                           SC_TRACK_FINE_OUTER_PERMILLE);
-      sc_track_finish_valid_sample(controller, -1);
-      return SC_TRACK_OK;
+    if (line->black_mask == 0x00u)
+    {
+      sc_track_reset_recovery_candidate(controller);
+      return sc_track_output_search(controller, target_out);
+    }
 
-    case 0x04u:
-      sc_track_set_command(command, SC_TRACK_FINE_OUTER_PERMILLE,
-                           SC_TRACK_FINE_INNER_PERMILLE);
-      sc_track_finish_valid_sample(controller, 1);
-      return SC_TRACK_OK;
-
-    case 0x03u:
-      sc_track_set_command(command, SC_TRACK_MEDIUM_INNER_PERMILLE,
-                           SC_TRACK_MEDIUM_OUTER_PERMILLE);
-      sc_track_finish_valid_sample(controller, -1);
-      return SC_TRACK_OK;
-
-    case 0x0Cu:
-      sc_track_set_command(command, SC_TRACK_MEDIUM_OUTER_PERMILLE,
-                           SC_TRACK_MEDIUM_INNER_PERMILLE);
-      sc_track_finish_valid_sample(controller, 1);
-      return SC_TRACK_OK;
-
-    case 0x01u:
-    case 0x07u:
-      sc_track_set_command(command, SC_TRACK_TURN_INNER_PERMILLE,
-                           SC_TRACK_TURN_OUTER_PERMILLE);
-      sc_track_finish_valid_sample(controller, -1);
-      return SC_TRACK_OK;
-
-    case 0x08u:
-    case 0x0Eu:
-      sc_track_set_command(command, SC_TRACK_TURN_OUTER_PERMILLE,
-                           SC_TRACK_TURN_INNER_PERMILLE);
-      sc_track_finish_valid_sample(controller, 1);
-      return SC_TRACK_OK;
-
-    case 0x00u:
-      return sc_track_recover_lost_line(controller, now_ms, command);
-
-    default:
-      return sc_track_follow_ambiguous_mask(controller, line->black_mask,
-                                            command);
+    if (sc_track_recovery_confirm(controller, line) == 0u)
+    {
+      return sc_track_output_search(controller, target_out);
+    }
+    return sc_track_follow_ordinary(controller, line->black_mask,
+                                    target_out);
   }
+
+  if (line->black_mask == 0x00u)
+  {
+    controller->recovering = 1u;
+    controller->lost_since_ms = now_ms;
+    sc_track_reset_recovery_candidate(controller);
+    return sc_track_output_search(controller, target_out);
+  }
+
+  return sc_track_follow_ordinary(controller, line->black_mask, target_out);
 }
