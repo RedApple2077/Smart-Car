@@ -10,7 +10,7 @@
 
 第二块 STM32F103C8T6、第二块 TB6612FNG、第二块 MPU6050 和第二个 HC-05 均作为备件。HC-SR04、SG90 云台和 PS/2 摇杆不进入比赛运行功能。面包板只用于原型验证，不作为比赛行驶时的可靠连接结构。
 
-本文定义硬件连接、硬件模块边界、可实现 C 接口和验收方法，不提供 PID 增益，不规定详细停车时序。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART2 和相应 GPIO；设备驱动、非阻塞 Service 和独立 HC-05 Bench 已完成，Wheel Service、速度闭环、完整应用安全门和速度闭环仍未实现。
+本文定义硬件连接、硬件模块边界、可实现 C 接口和验收方法，不提供已验证 PID 增益，不规定详细停车时序。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART2 和相应 GPIO；设备驱动、非阻塞 Service、Wheel Service、双轮速度控制模块和独立 HC-05 Bench 已完成，但这些速度模块尚未接入主循环，完整应用安全门仍未实现。
 
 ### 1.1 比赛边界
 
@@ -48,9 +48,9 @@
 - 电机与状态输出：`PA4/AIN1`、`PA5/AIN2`、`PB0/BIN1`、`PB1/BIN2`、`PB8/TB6612_STBY`、`PB9/STATUS_LED` 均为推挽输出。正式固件初始化 TB6612 后保持 STBY 低。
 - 当前主循环：依次推进 LF04 采样与语义、编码器、MPU6050、SSD1306、UART；Bench 构建额外推进蓝牙命令、心跳和限时单轮控制。
 - 正式/Bench 隔离：正式 Debug/Release 不链接 `sc_bt_bench`，不包含蓝牙运动命令；Bench 产物为 `build/Bench/Smart-Car-HC05Bench.elf`，提供 `PING/STATUS/LINE/LF/ARM/MOTOR/STOP/RESET/HELP`。
-- 当前测试状态：UART 13/13 且缺陷变体 3/3；按键 3/3 且缺陷变体 1/1；寄存器级紧急停机 1/1；I2C/MPU/OLED 15/15 且缺陷变体 13/13；TB6612/编码器 24/24 且缺陷变体 18/18；LF04/线路语义 13/13 且缺陷变体 11/11；Bench 31/31 且缺陷变体 13/13。Debug、Release、Bench 均完成交叉编译和链接，正式 ELF 已完成无 Bench 符号/协议字符串审计。
+- 当前测试状态：UART 13/13 且缺陷变体 3/3；按键 3/3 且缺陷变体 1/1；寄存器级紧急停机 1/1；Wheel Service 8/8 且缺陷变体 6/6；PID 6/6 且缺陷变体 4/4；双轮速度控制 9/9 且缺陷变体 6/6；I2C/MPU/OLED 15/15 且缺陷变体 13/13；TB6612/编码器 24/24 且缺陷变体 18/18；LF04/线路语义 13/13 且缺陷变体 11/11；Bench 31/31 且缺陷变体 13/13。Debug、Release、Bench 均完成交叉编译和链接，正式 ELF 已完成无 Bench 符号/协议字符串审计。
 - 当前硬件验证：TB6612 单轮短脉冲、左右通道隔离、自动停机、编码器计数和右电机方向纠正已完成台架验证；HC-05 SPP 已完成命令交互。MPU6050/OLED 的最终整车隔离、LF04 实物识别、双轮速度闭环、长稳、供电余量和赛道表现仍未验证。
-- 当前源码边界：设备和语义驱动、非阻塞 Service、自动校零、OLED 异步刷新、TB6612/编码器基础控制以及独立 HC-05 Bench 已实现；Wheel Service、双轮速度环/PID、循迹策略、应用安全门、配置存储、正式遥测和永久车载状态页尚未实现。
+- 当前源码边界：设备和语义驱动、非阻塞 Service、Wheel Service、并联 PID、双轮速度控制、自动校零、OLED 异步刷新、TB6612/编码器基础控制以及独立 HC-05 Bench 已实现；速度链路尚未接入主循环或 Bench，应用安全门、配置存储、正式遥测和永久车载状态页尚未实现。
 
 ## 2. 44 项物料状态表
 
@@ -629,8 +629,9 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 | API | 输入 | 返回/输出 | 责任边界 |
 |---|---|---|---|
 | `sc_line_service_update(sample)` | `sc_line_sample_t` | `sc_line_state_t` | 计算黑线掩码并分类；只解释 LF04 位型。 |
-| `sc_wheel_service_update(raw_counts, now_ms)` | 编码器计数、时间 | `sc_wheel_feedback_t` | 应用方向/极性和每转计数，计算 `mm/s` 与里程增量。 |
-| `sc_wheel_speed_controller_step(left_ref_mm_s, right_ref_mm_s, feedback, dt_ms)` | 两轮目标、反馈、时间差 | `(status, [left_pwm, right_pwm])` | 双轮速度控制入口，具体控制参数不在此文档填写。 |
+| `sc_wheel_service_update(service, snapshot, calibration, now_ms, feedback)` | 单个编码器快照、标定、时间 | `sc_wheel_feedback_t` | 每侧保存最近 6 个快照，以最近 5 个有效时间差计算首末累计计数差；热身后每个新快照都输出左右独立有效性和有符号 `mm/s`。 |
+| `sc_pid_calculate()` / `sc_pid_commit()` | 目标、测量、实际 `dt_ms`、最终提交值 | 未限幅 PID 输出、条件积分提交 | 并联 PID，微分作用测量值；根据限幅和斜坡后实际提交值冻结积分。 |
+| `sc_speed_controller_step(left_ref_mm_s, right_ref_mm_s, feedback, now_ms)` | 两轮目标、Wheel 反馈、时间 | `(status, left/right PWM permille)` | 目标斜坡、前馈、左右独立 PID、输出斜坡和 `-564..564` 限幅；任一侧反馈无效时两路清零。 |
 | `sc_odometry_service_update(feedback)` | 轮反馈 | 左右累计距离 `mm` | 只做轮里程积分，不用来声称四轮状态。 |
 | `sc_imu_service_update(raw_imu, dt_ms)` | Driver 原始 `sc_imu_sample_t`、时间差 | 处理后的 `sc_imu_sample_t` | 负责零偏修正并填写短期 `heading_delta_mdeg`；超时/无效时保持零增量并降级。 |
 | `sc_config_service_load(config_out)` | Flash 配置页 | `sc_status_t` + 配置 | 校验 magic、版本、长度和 CRC32；失败返回 `SC_ERR_CALIBRATION_REQUIRED`。 |
@@ -639,7 +640,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 | `sc_telemetry_service_emit()` | 无 | `sc_status_t` | 通过唯一的 USART2 非阻塞发送；缓冲空间不足时丢弃新遥测行并返回 `SC_ERR_BUFFER_FULL`，不等待无线连接。 |
 | `sc_scheduler_service_tick(now_ms)` | 当前时间 | 触发位 | 产生固定周期任务标志；ISR 不执行业务。 |
 
-编码器换算是 Service 的职责，不允许在 Control 或 Application 中重复实现。`sc_wheel_speed_controller_step()` 只回答“给定目标和反馈，控制请求是什么”，不直接写 TB6612。
+编码器换算是 Service 的职责，不允许在 Control 或 Application 中重复实现。`sc_speed_controller_step()` 只回答“给定目标和反馈，控制请求是什么”，不直接写 TB6612。
 
 ### 7.6 Control 层
 
