@@ -152,6 +152,8 @@ try {
   Invoke-ExpectedPass -BuildDirectory $baselineBuild `
     -TestName "tb_scaling_same_direction"
   Invoke-ExpectedPass -BuildDirectory $baselineBuild `
+    -TestName "tb_zero_same_direction_fast_path"
+  Invoke-ExpectedPass -BuildDirectory $baselineBuild `
     -TestName "tb_init_standby_idempotent"
   Invoke-ExpectedPass -BuildDirectory $baselineBuild `
     -TestName "tb_config_reject"
@@ -213,6 +215,22 @@ try {
   }
 '@ `
     -TestName "tb_zero_high_impedance"
+
+  Invoke-Mutant -Name "tb_zero_fast_path_guard" -SourcePath $tbSource `
+    -Original @'
+  if ((left_direction == sc_tb6612_command_direction(
+        s_state.left_command)) &&
+      (right_direction == sc_tb6612_command_direction(
+        s_state.right_command)))
+'@ `
+    -Replacement @'
+  if ((left_direction != 0) && (right_direction != 0) &&
+      (left_direction == sc_tb6612_command_direction(
+        s_state.left_command)) &&
+      (right_direction == sc_tb6612_command_direction(
+        s_state.right_command)))
+'@ `
+    -TestName "tb_zero_same_direction_fast_path"
 
   Invoke-Mutant -Name "tb_out_of_range_no_stop" -SourcePath $tbSource `
     -Original @'

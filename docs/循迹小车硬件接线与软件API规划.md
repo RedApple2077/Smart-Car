@@ -10,7 +10,7 @@
 
 第二块 STM32F103C8T6、第二块 TB6612FNG、第二块 MPU6050 和第二个 HC-05 均作为备件。HC-SR04、SG90 云台和 PS/2 摇杆不进入比赛运行功能。面包板只用于原型验证，不作为比赛行驶时的可靠连接结构。
 
-本文定义硬件连接、硬件模块边界、可实现 C 接口和验收方法，不提供 PID 增益，不规定详细停车时序。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART1/USART2 和相应 GPIO；设备驱动、非阻塞 Service 和独立 HC-05 Bench 已完成，Wheel Service、速度闭环、循迹策略和应用安全门尚未实现。
+本文定义硬件连接、硬件模块边界、可实现 C 接口和验收方法，不提供 PID 增益，不规定详细停车时序。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART2 和相应 GPIO；设备驱动、非阻塞 Service 和独立 HC-05 Bench 已完成，Wheel Service、速度闭环、完整应用安全门和速度闭环仍未实现。
 
 ### 1.1 比赛边界
 
@@ -43,12 +43,12 @@
 - TIM2：`PA0/PA1` 对应 `TIM2_CH1/CH2`，编码器模式 `TIM_ENCODERMODE_TI12`，输入滤波参数 10、预分频 0、周期 65535。`sc_encoder` 已启动计数并实现 16 位回绕、失同步冻结和计数重置。
 - TIM3：`PA6/PA7` 对应 `TIM3_CH1/CH2`，配置与 TIM2 相同，并纳入同一个双路编码器快照。
 - TIM4：`PB6/PB7` 对应 `TIM4_CH1/CH2`，PWM1 模式，预分频 0、周期 3599，定时器时钟 72 MHz 时 PWM 频率约 20 kHz。`sc_tb6612` 已启动双路 PWM，实现方向、STBY、零输出滑行和安全停机。
-- USART1：`PA9/PA10` 为 TX/RX，115200 8N1，无硬件流控；USART2：`PA2/PA3` 为 TX/RX，9600 8N1。`sc_uart` 使用单字节中断接收、TX 环形缓冲和 `HAL_UART_Transmit_IT()`，提供溢出及线路错误统计。
+- USART2：`PA2/PA3` 为 TX/RX，9600 8N1，无硬件流控。`sc_uart_init(baud, rx_enable)` 只服务这一端口；正式固件禁用接收，Bench 固件启用单字节中断接收。发送使用 TX 环形缓冲和 `HAL_UART_Transmit_IT()`，驱动提供溢出及线路错误统计。
 - LF04：`PB12..PB15` 对应 `O1..O4` 上拉输入。`sc_lf04` 校验 GPIOB 配置并从单次 `IDR` 快照采样；`sc_line_service` 输出 `raw_levels`、`black_mask` 和完整语义枚举，正式主循环持续更新缓存但不执行电机控制。
 - 电机与状态输出：`PA4/AIN1`、`PA5/AIN2`、`PB0/BIN1`、`PB1/BIN2`、`PB8/TB6612_STBY`、`PB9/STATUS_LED` 均为推挽输出。正式固件初始化 TB6612 后保持 STBY 低。
 - 当前主循环：依次推进 LF04 采样与语义、编码器、MPU6050、SSD1306、UART；Bench 构建额外推进蓝牙命令、心跳和限时单轮控制。
 - 正式/Bench 隔离：正式 Debug/Release 不链接 `sc_bt_bench`，不包含蓝牙运动命令；Bench 产物为 `build/Bench/Smart-Car-HC05Bench.elf`，提供 `PING/STATUS/LINE/LF/ARM/MOTOR/STOP/RESET/HELP`。
-- 当前测试状态：UART 10/10；I2C/MPU/OLED 15/15 且缺陷变体 13/13；TB6612/编码器 23/23 且缺陷变体 17/17；LF04/线路语义 13/13 且缺陷变体 11/11；Bench 31/31 且缺陷变体 13/13。Debug、Release、Bench 均完成交叉编译和链接，正式 ELF 已完成无 Bench 符号/协议字符串审计。
+- 当前测试状态：UART 13/13 且缺陷变体 3/3；按键 3/3 且缺陷变体 1/1；寄存器级紧急停机 1/1；I2C/MPU/OLED 15/15 且缺陷变体 13/13；TB6612/编码器 24/24 且缺陷变体 18/18；LF04/线路语义 13/13 且缺陷变体 11/11；Bench 31/31 且缺陷变体 13/13。Debug、Release、Bench 均完成交叉编译和链接，正式 ELF 已完成无 Bench 符号/协议字符串审计。
 - 当前硬件验证：TB6612 单轮短脉冲、左右通道隔离、自动停机、编码器计数和右电机方向纠正已完成台架验证；HC-05 SPP 已完成命令交互。MPU6050/OLED 的最终整车隔离、LF04 实物识别、双轮速度闭环、长稳、供电余量和赛道表现仍未验证。
 - 当前源码边界：设备和语义驱动、非阻塞 Service、自动校零、OLED 异步刷新、TB6612/编码器基础控制以及独立 HC-05 Bench 已实现；Wheel Service、双轮速度环/PID、循迹策略、应用安全门、配置存储、正式遥测和永久车载状态页尚未实现。
 
@@ -58,7 +58,7 @@
 
 | 序号 | 物料与数量 | 状态 | 规划用途 |
 |---:|---|---|---|
-| 1 | ST-Link 调试器（SWD）×1 | 台架工具 | 只用于离线烧录；烧录时电池、Type-C 和外设负载断开，以 ST-Link 3.3V 作为唯一目标电源。比赛和在线运行不接；在线运行调试只走 CH340/OLED。 |
+| 1 | ST-Link 调试器（SWD）×1 | 台架工具 | 只用于离线烧录；烧录时电池、Type-C 和外设负载断开，以 ST-Link 3.3V 作为唯一目标电源。比赛和在线运行不接；在线状态只通过 OLED 或 HC-05 查看。 |
 | 2 | STM32F103C8T6 开发板（Type-C 接口）×2 | 比赛主链路 | 1 块作为实时控制核心；第 2 块作为备件。 |
 | 3 | 830 孔面包板 ×1 | 台架工具 | 仅做原型与电气检查，不用于比赛车的最终固定连接。 |
 | 4 | LED 红发光二极管 ×3 | 辅助/调试 | 1 只经 510Ω 接 `PB9` 作状态灯；其余 2 只备用。 |
@@ -69,7 +69,7 @@
 | 9 | 杜邦线 10cm 公对母 ×20条 | 台架工具 | 台架转接与探头测试。 |
 | 10 | 杜邦线 20cm 公对公 ×20条 | 台架工具 | 较长距离原型连接，最终车体使用固定线束。 |
 | 11 | 杜邦线 20cm 公对母 ×20条 | 台架工具 | 较长距离原型连接，最终车体使用固定线束。 |
-| 12 | USB-A 转 Micro-USB 数据线 ×1条 | 台架工具 | 给 CH340 或其他 Micro-USB 调试设备供电和通信。 |
+| 12 | USB-A 转 Micro-USB 数据线 ×1条 | 台架工具 | 通用 Micro-USB 数据线；本车不保留额外有线串口调试链路。 |
 | 13 | PH2.0 6P 转 XH2.54 6P 双头线 20cm ×2条 | 比赛主链路 | 两台 MG310 预装线束的转接基础，每个电机 1 条；最终需固定并做应力释放。 |
 | 14 | PH2.0 6P 单头线 20cm ×2条 | 备件 | 线束返修或台架测试备用。 |
 | 15 | XH2.54 6P 弯插座 ×2个 | 备件 | 电机/编码器线束返修或替换用，不进入基线。 |
@@ -93,7 +93,7 @@
 | 33 | 船形开关（两档黑色，不带线）×3个 | 备件 | 可作为维护开关备件；基线不串接第二个总电源开关。 |
 | 34 | 船形开关（两档红色，不带线）×3个 | 备件 | 可作为维护开关备件；不得在带电时改线。 |
 | 35 | HC-05 蓝牙模块（带底板、焊排针）×2个 | 辅助/调试 | 1 个可选用于 9600 波特率只读遥测；第 2 个作备件。比赛态不接受无线电机控制。 |
-| 36 | CH340G USB 转 TTL 模组（HW-597）×1 | 台架工具 | 有线串口日志、参数读取和台架调试；使用 3.3V TTL，不接目标板 VCC。 |
+| 36 | USB 转 TTL 串口模组 ×1 | 不用 | 基线只保留 HC-05 的 USART2；该模组不接线、不供电，不进入固件、测试或整车。 |
 | 37 | SG90 9G 舵机（90°–180°）×1个 | 不用 | 比赛规则无转向舵机需求，且会增加 5V 电流和稳压发热。 |
 | 38 | HC-SR04 超声波模块 ×1个 | 不用 | 比赛规则无避障需求，Echo 为 5V 信号，不进入 3.3V 主控链路。 |
 | 39 | SG90/HC-SR04 云台支架组件 ×1套 | 不用 | 与不采用的舵机和超声波配套，不进入比赛机械结构。 |
@@ -148,10 +148,10 @@ MPU6050───────┤                                    │
                                                    v
                                                左右电机
 
-OLED / CH340 / HC-05 <── 只读遥测快照
+OLED / HC-05 <── 只读遥测快照
 ```
 
-MPU6050、OLED、HC-05 和 CH340 都是旁路设备。它们失效时不能阻断 LF04、左右编码器、TB6612 和启动按键组成的基本比赛链。
+MPU6050、OLED 和 HC-05 都是旁路设备。它们失效时不能阻断 LF04、左右编码器、TB6612 和启动按键组成的基本比赛链。
 
 ### 3.3 软件层次依赖
 
@@ -197,8 +197,6 @@ TB6612 Driver
 | LF04 O4 | `PB15` | GPIO 输入 | 按车体左到右第 4 路。 |
 | I2C2 SCL | `PB10` | 复用开漏 | MPU6050 与 OLED 共用，外部上拉只回 3.3V。 |
 | I2C2 SDA | `PB11` | 复用开漏 | MPU6050 与 OLED 共用，外部上拉只回 3.3V。 |
-| CH340 TX | `PA10 / USART1_RX` | 复用输入 | 接收 CH340 的 TX。 |
-| CH340 RX | `PA9 / USART1_TX` | 复用推挽 | 发送到 CH340 的 RX。 |
 | HC-05 RXD | `PA2 / USART2_TX` | 复用推挽 | MCU 发送到蓝牙 RXD。 |
 | HC-05 TXD | `PA3 / USART2_RX` | 复用输入 | 蓝牙 TXD 发送到 MCU。 |
 | 发车按键 | `PB5` | GPIO 输入上拉 | 按键另一端接 GND，按下为低。 |
@@ -206,7 +204,7 @@ TB6612 Driver
 | SWDIO | `PA13` | SWD | 仅离线烧录。 |
 | SWCLK | `PA14` | SWD | 仅离线烧录。 |
 
-资源检查结果：上述 MCU 功能引脚互不重复；TIM2/TIM3 只作编码器模式，TIM4 只作双路 PWM；I2C2 和两个 USART 与电机控制引脚不共用。`PA11/PA12`、`PC13`、TIM1、USART3、I2C1 保留，不进入基线。
+资源检查结果：上述 MCU 功能引脚互不重复；TIM2/TIM3 只作编码器模式，TIM4 只作双路 PWM；I2C2 与 USART2 同电机控制引脚不共用。`PA9/PA10`、`PA11/PA12`、`PC13`、TIM1、USART3、I2C1 保留，不进入基线。
 
 ## 4. 接线表
 
@@ -218,7 +216,7 @@ TB6612 Driver
 - I2C2 的 SCL/SDA 上拉必须回到 3.3V。不得让 OLED、MPU6050 或底板上的 5V 上拉进入 MCU。
 - UART 必须交叉：模块 TXD 接 MCU RX，模块 RXD 接 MCU TX。
 - TB6612 的 VM 是电机电源，VCC 是逻辑电源；两者不可互换。
-- 目标板的 5V/3.3V 电源轨任一时刻只允许一个供电源；电池、Type-C 和 ST-Link 3.3V 不得并联。CH340 可由 USB 为自身供电，但其 VCC 不接目标板，因此只共地并连接 3.3V TTL 串口信号。
+- 目标板的 5V/3.3V 电源轨任一时刻只允许一个供电源；电池、Type-C 和 ST-Link 3.3V 不得并联。额外 USB 转 TTL 模组不进入本车串口或供电链路。
 - 每个模块的 GND 都必须回到同一系统 GND。接插前排空电源，首次上电采用限流或快速断电检查。
 
 ### 4.2 电池、稳压与核心板
@@ -341,10 +339,6 @@ I2C2 基线速率先采用 100 kHz 标准模式。MPU6050 和 OLED 都必须分�
 
 | 模块 | 模块引脚 | STM32/目标 | 方向 | 电平 | 备注 |
 |---|---|---|---|---|---|
-| CH340G | `TXD` | `PA10 / USART1_RX` | CH340 输出 | 3.3V TTL | 交叉连接，禁止 5V 串口电平。 |
-| CH340G | `RXD` | `PA9 / USART1_TX` | CH340 输入 | 3.3V TTL | 交叉连接。 |
-| CH340G | `GND` | 系统 `GND` | 参考地 | 0V | USB 自供电时也必须共地。 |
-| CH340G | `VCC` | 不连接目标板 | 独立供电 | - | 由 USB 侧供电，不向目标板反送 VCC。 |
 | HC-05 底板 | `VCC` | AMS1117-5 `5V` | 电源输入 | 5.0V | 底板标注输入范围 3.6-6V。 |
 | HC-05 底板 | `GND` | 系统 `GND` | 回流 | 0V | 共地。 |
 | HC-05 底板 | `RXD` | `PA2 / USART2_TX` | 蓝牙输入 | 3.3V TTL | MCU 发送到蓝牙。 |
@@ -352,7 +346,7 @@ I2C2 基线速率先采用 100 kHz 标准模式。MPU6050 和 OLED 都必须分�
 | HC-05 底板 | `STATE` | 不连接 | 状态输出 | - | 仅板载指示灯使用，不参与控制。 |
 | HC-05 底板 | `EN` | 不连接 | 保持默认 | - | 不在比赛态切换 AT 模式。 |
 
-CH340 台架串口固定 `115200 8N1`，HC-05 默认通信约定为 `9600 8N1`。HC-05 在比赛态只发送遥测；即使收到任何字符，也不得改变目标速度、PID、方向或电机使能。
+HC-05 串口固定为 `9600 8N1`。正式固件调用 `sc_uart_init(9600u, 0u)`，只保留发送能力；独立 Bench 固件调用 `sc_uart_init(9600u, 1u)`，仅用于受控台架命令。正式固件即使收到任何字符，也不得改变目标速度、方向或电机使能。
 
 ### 4.9 线束和机械连接
 
@@ -433,7 +427,7 @@ Control 只使用 Service 返回的 `semantic_state`；不得再读取 `raw_leve
 | MPU6050 | 提供短时 gyro-Z 角速度测量 | 3.3V、I2C2、静止零偏 | 原始角速度、校准与有效性 | I2C2 地址 `0x68`；Service 负责生成短期航向增量 | 初始化、NACK 或数据无效时标记 `degraded`，循迹主链继续运行但不做航向辅助。 |
 | SSD1306 OLED | 显示运行快照和故障原因 | I2C2 地址 `0x3C`、状态快照 | 文本/图形显示 | I2C2 总线和显示缓冲 | NACK 或刷新超时只关闭显示，不改变控制状态。 |
 | HC-05 底板 | 发送调试遥测 | USART2、5V VCC、3.3V TTL | 只读遥测文本 | 5V 电源、UART 交叉和配对 | 未连接、断开或丢包时比赛控制仍可运行；比赛态忽略所有入站运动命令。 |
-| CH340G | 串口日志、参数读取和台架调试 | USB、USART1、3.3V TTL | 调试文本 | USB 电源和共地 | 不作为比赛运行依赖；未连接时静默降级。 |
+| USB 转 TTL 串口模组 | 不进入当前硬件基线 | 不接线 | 无 | 无 | 项目只保留 HC-05 的 USART2；不接入供电、信号或固件。 |
 | ST-Link V2 | 离线烧录 | USB、SWD、3.3V | 离线烧录接口 | 唯一电源模式 | 比赛和正常电池运行均不连接；接口异常不影响已完成烧录的逻辑。 |
 | AMS1117-5.0 | 将 2S 输入降至 5V | 7.2-8.4V 输入、GND | 5V 逻辑电源 | 电池开关和散热 | 输出异常会使核心板复位或掉电；重启应用保持待命，不能由第二块模块并联补流。 |
 | 2S 电池组与电池盒 | 车辆动力和逻辑能量来源 | 两节 18650、电池盒开关 | 7.2-8.4V、可断电 | 极性、熔断/限流建议和机械固定 | 装配检查排除极性错误和电池仓松动；Type-C 与电池不得同时供电。 |
@@ -452,7 +446,7 @@ Control 只使用 Service 返回的 `semantic_state`；不得再读取 `raw_leve
 - 不使用 RTOS、动态内存、递归或运行中 `malloc`。驱动、服务和显示缓冲在编译期分配。
 - ISR 只做计数、捕获时间或置位；不执行 PID、状态机、OLED 刷新、字符串格式化或长日志。
 - BSP 上电初始化时可以把 PWM、方向和 STBY 配置为安全静态电平；进入正常运行后，PWM、方向和 STBY 只能由 TB6612 Driver 经 BSP 原语写入。应用层是唯一允许提交执行器请求的模块。
-- 外部 OLED、CH340、HC-05 只能读取 `sc_run_state_t`，不能通过写接口反改控制状态。
+- 外部 OLED 和 HC-05 只能读取 `sc_run_state_t`，不能通过写接口反改控制状态。
 - 速度、距离、角度、时间和 PWM 在跨层接口中保持统一单位，不做隐式单位换算。
 
 ### 7.2 公共类型
@@ -588,7 +582,7 @@ typedef struct {
 
 | API | 输入 | 返回/输出 | 责任边界 |
 |---|---|---|---|
-| `sc_bsp_init()` | 无 | `sc_status_t` | 初始化时钟、GPIO、TIM2/TIM3 编码器、TIM4 PWM、I2C2、USART1/2、Flash；上电阶段把 PWM=0、方向脚低、STBY 低配置为安全静态电平。 |
+| `sc_bsp_init()` | 无 | `sc_status_t` | 初始化时钟、GPIO、TIM2/TIM3 编码器、TIM4 PWM、I2C2、USART2、Flash；上电阶段把 PWM=0、方向脚低、STBY 低配置为安全静态电平。 |
 | `sc_bsp_millis()` | 无 | `uint32_t` | 1 ms 时间基准，只读。 |
 | `sc_bsp_gpio_read(pin)` | 固定引脚编号 | 电平 | 只供 Button 和 LF04 Driver 读取。 |
 | `sc_bsp_gpio_write(pin, level)` | 固定引脚编号、电平 | `sc_status_t` | 上电初始化可设置安全静态电平；运行期只供 TB6612、LED Driver 写入，应用和 Control 不直接调用。 |
@@ -614,6 +608,7 @@ BSP 只提供原语，不决定循迹行为。编码器 TIM2/TIM3 和 UART/I2C �
 | `sc_tb6612_init()` | 当前 BSP | `sc_status_t` | 拉低 STBY、方向脚和两路 PWM；确认无效输出。 |
 | `sc_tb6612_set_standby(enable)` | `uint8_t` | `sc_status_t` | 只改变 STBY；该函数是唯一 STBY 写入口。 |
 | `sc_tb6612_apply(left_permille, right_permille)` | 两路有符号 PWM 权限 | `sc_status_t` | 把有符号命令转换成正/反/制动/停转和两路方向；越界拒绝。 |
+| `sc_safety_emergency_stop()` | 无 | 无 | 直接拉低 PA4/PA5、PB0/PB1、PB8 并清零 TIM4 CCR1/CCR2；不依赖 HAL 句柄或驱动状态，供 Error_Handler 和 CPU 异常入口首先调用。 |
 | `sc_encoder_init()` | 当前 BSP | `sc_status_t` | 启动 TIM2/TIM3 编码器模式并清零累计。 |
 | `sc_encoder_sample()` | BSP 计数、时间 | `sc_wheel_feedback_t` | 输出计数差和有效性，不直接读控制状态。 |
 | `sc_mpu6050_init()` | I2C2 地址 `0x68` | `sc_status_t` | 检查 WHO_AM_I、配置量程和数字滤波；不假装永久航向。 |
@@ -621,8 +616,8 @@ BSP 只提供原语，不决定循迹行为。编码器 TIM2/TIM3 和 UART/I2C �
 | `sc_mpu6050_sample()` | 当前时间 | `sc_imu_sample_t` | 输出测量角速度、校准与有效性；`heading_delta_mdeg` 固定为 0，不在驱动内积分。 |
 | `sc_ssd1306_init()` | I2C2 地址 `0x3C` | `sc_status_t` | 初始化显示控制器；NACK 只影响显示。 |
 | `sc_ssd1306_show(state)` | 只读 `sc_run_state_t` | `sc_status_t` | 显示快照；超时返回错误，不修改控制状态。 |
-| `sc_uart_init(port, baud)` | USART1/2、波特率 | `sc_status_t` | 配置 8N1；USART1=115200，USART2=9600。 |
-| `sc_uart_write(port, text)` | 串口号、只读文本 | `sc_status_t` | 只发送遥测或诊断行。 |
+| `sc_uart_init(baud, rx_enable)` | 波特率、接收使能 | `sc_status_t` | 固定 HC-05/USART2 9600 8N1；正式固件传 `0`，Bench 传 `1`。 |
+| `sc_uart_write(text)` | 只读文本 | `sc_status_t` | 只发送遥测或诊断行，不等待远端。 |
 | `sc_button_init()` | 当前 BSP | `sc_status_t` | 配置 `PB5` 上拉输入。 |
 | `sc_button_poll(now_ms)` | 时间 | `uint8_t` 事件位 | 只输出按下/释放/长按事件，不直接启动电机。 |
 | `sc_led_init()` / `sc_led_set(on)` | 当前 BSP | `sc_status_t` | 只控制 `PB9` 状态灯。 |
@@ -641,7 +636,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 | `sc_config_service_load(config_out)` | Flash 配置页 | `sc_status_t` + 配置 | 校验 magic、版本、长度和 CRC32；失败返回 `SC_ERR_CALIBRATION_REQUIRED`。 |
 | `sc_config_service_save(config_in)` | 完整配置、Application 静止确认 | `sc_status_t` | 只在 Application 已确认静止后，先算 CRC 再调用 BSP Flash 原语。 |
 | `sc_telemetry_service_update(state)` | `sc_run_state_t` | 无 | 更新固定大小遥测缓冲，不阻塞控制循环。 |
-| `sc_telemetry_service_emit(port)` | USART1/2 | `sc_status_t` | 非阻塞发送；缓冲空间不足时丢弃新遥测行并返回 `SC_ERR_BUFFER_FULL`，不等待无线连接。 |
+| `sc_telemetry_service_emit()` | 无 | `sc_status_t` | 通过唯一的 USART2 非阻塞发送；缓冲空间不足时丢弃新遥测行并返回 `SC_ERR_BUFFER_FULL`，不等待无线连接。 |
 | `sc_scheduler_service_tick(now_ms)` | 当前时间 | 触发位 | 产生固定周期任务标志；ISR 不执行业务。 |
 
 编码器换算是 Service 的职责，不允许在 Control 或 Application 中重复实现。`sc_wheel_speed_controller_step()` 只回答“给定目标和反馈，控制请求是什么”，不直接写 TB6612。
@@ -684,7 +679,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 | `SC_FAULT_CONFIG` | magic、版本、长度或 CRC 无效 | 要求重新标定/恢复配置。 |
 | `SC_FAULT_IMU_DEGRADED` | MPU6050 NACK、超时或数据无效 | 只关闭航向辅助，允许基本循迹继续。 |
 | `SC_FAULT_DISPLAY_DEGRADED` | OLED NACK、刷新超时 | 只关闭显示。 |
-| `SC_FAULT_TELEMETRY_DEGRADED` | HC-05/CH340 缓冲满或断开 | 不影响核心控制。 |
+| `SC_FAULT_TELEMETRY_DEGRADED` | HC-05 缓冲满或断开 | 不影响核心控制。 |
 | `SC_FAULT_BUTTON` | 发车按键状态持续异常 | 保持待命，便于场外处理。 |
 
 配置结构必须包含 `magic`、`schema_version`、`payload_size` 和 `crc32`。配置字段只覆盖 LF04 位序/极性、电机和编码器方向、轮径/每转计数、IMU 零偏和必要的校准结果；不包含 PID 增益或丢线找回时长。
@@ -696,24 +691,28 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 ### 8.1 按键和基础运行入口
 
 - `PB5` 配置为上拉输入，按下为低。短按释放只产生 `sc_app_arm()` / 启动请求，不直接写 PWM。
+- 初始化时按键稳定态直接取当前原始电平；上电已按住时不会伪造新的 `PRESSED`。释放事件可能没有前置 `PRESSED`，应用必须按 `PRESSED -> RELEASED` 序列配对并忽略孤立的 `RELEASED`。
 - 上电时先保持 STBY 低、PWM 零和配置读取；LED 只在应用层有能力显示状态后开始提示。
 - 在静止的台架状态，继续按住至少 3 秒产生配置恢复请求并保存；运行态忽略该请求。
 - 按键消抖、长按判定和恢复动作由应用层调度器处理，不写在 GPIO 中断里。
 - OLED 可显示 `phase`、`LF raw/mask/state`、左右轮目标和实际速度、IMU 有效性、`STBY` 和故障位。
 
-### 8.2 CH340 台架日志
+### 8.2 HC-05 Bench 台架命令
 
-USART1 使用 `115200 8N1`，只用于台架日志、状态读取和配置命令。允许的命令集合为：
+独立 Bench 固件通过 USART2/HC-05 的 `9600 8N1` 接收受控命令，正式固件不链接命令层且不解析入站运动命令。当前 Bench 命令集合为：
 
 | 命令 | 作用 | 限制 |
 |---|---|---|
-| `STATUS` | 输出一行只读状态 | 不改变控制状态。 |
-| `SNAPSHOT` | 输出完整 `sc_run_state_t` 字段 | 不等待串口 ACK，不阻塞控制。 |
-| `CONFIG?` | 读取当前配置和 CRC 状态 | 只读。 |
-| `CONFIG SAVE` | 保存当前已通过校验的配置 | 只允许静止台架状态，保存后做 CRC 和回读核对。 |
-| `CONFIG RESET` | 在静止台架状态恢复默认配置 | 不允许运行态执行。 |
+| `PING` | 验证链路 | 只返回 `OK PONG`。 |
+| `STATUS` | 输出 TB6612 与编码器状态 | 只读。 |
+| `LINE` / `LF` | 输出 LF04 原始电平、掩码和线路语义 | 只读。 |
+| `ARM` | 打开 5 秒布防窗口 | 电机必须已处于安全待机。 |
+| `MOTOR <L|R> <±150> <100-2000>` | 单轮限时测试 | 必须布防，每次命令只执行一个受限窗口。 |
+| `STOP` | 零输出并撤销 STBY | 任意时刻安全停止。 |
+| `RESET` | 停止状态下重置编码器计数 | 运行或布防状态拒绝。 |
+| `HELP` | 输出命令列表 | 只读。 |
 
-CH340 的 `VCC` 不接目标板。使用前确认模组逻辑电平为 3.3V；TX/RX 交叉连接，GND 共地。
+Bench 固件同样依赖 STBY 安全序列和超时自动停机；它不进入 Debug/Release 正式产物。
 
 ### 8.3 HC-05 遥测
 
@@ -752,7 +751,7 @@ OLED 使用 I2C2 `0x3C`，显示快照而非可写控制入口。刷新可以失
 | MPU6050 零偏 | 车辆静止，采样窗口完成 bias，再左右旋转车体。 | 静止时角速度接近零，旋转方向符号正确；曲线只用于短时辅助。 |
 | I2C 地址 | 在 I2C2 扫描地址。 | MPU6050 出现 `0x68`，OLED 出现 `0x3C`；单个设备缺失只降级对应功能。 |
 | 电源与共地 | 断电检查电池、5V、3.3V 极性和共地，再依次上电。 | 无 5V 进入编码器/I2C；输入端电压在 3.3V 允许范围；Logic GND、PGND 和电池负极连通。 |
-| 单电源模式 | 检查电池、Type-C、ST-Link、CH340 的连接状态。 | 运行只用电池；烧录只用 ST-Link 3.3V；不出现两个电源同时向目标供电。 |
+| 单电源模式 | 检查电池、Type-C 与 ST-Link 的连接状态。 | 运行只用电池；烧录只用 ST-Link 3.3V；不出现两个电源同时向目标供电。 |
 
 ## 9. 未来实现验收矩阵与缺陷对照
 
@@ -776,9 +775,9 @@ OLED 使用 I2C2 `0x3C`，显示快照而非可写控制入口。刷新可以失
 | A14 | OLED 缺失 | `SC_FAULT_DISPLAY_DEGRADED`，控制快照继续更新 | 因 OLED NACK 把 TB6612 或服务循环锁死，断言失败。 |
 | A15 | HC-05 缺失/断连 | 遥测降级，CPU 不等待无线 ACK，执行器仍受应用安全门控制 | 因蓝牙断开阻塞控制、停车，或让入站字符改变输出，断言失败。 |
 | A16 | I2C NACK | 返回 `SC_ERR_TIMEOUT`/`SC_ERR_BUS`，不伪造有效样本 | 把 NACK 当作零角速度或有效显示数据，断言失败。 |
-| A17 | 目标板电源单源 | 电池、Type-C、ST-Link 3.3V 中只允许一个向目标板供电；CH340 仅 USB 自供电、VCC 不接目标板时可以与电池供电的 UART 台架同时使用 | 两个源同时接目标板 5V/3.3V 电源轨仍允许上电，电源检查断言失败。 |
+| A17 | 目标板电源单源 | 电池、Type-C、ST-Link 3.3V 中只允许一个向目标板供电 | 两个源同时接目标板 5V/3.3V 电源轨仍允许上电，电源检查断言失败。 |
 | A18 | 极性/共地 | 编码器只接 3.3V，I2C 上拉只回 3.3V，PGND/GND 和电池负极共地 | 接 5V 编码器、5V 上拉或悬空功率地，电气检查断言失败。 |
-| A19 | 辅助通道隔离 | 断开 MPU、OLED、HC-05、CH340 中任一设备，基本启动入口和执行器安全门仍可初始化 | 任一辅助设备成为控制必要条件，降级断言失败。 |
+| A19 | 辅助通道隔离 | 断开 MPU、OLED、HC-05 中任一设备，基本启动入口和执行器安全门仍可初始化 | 任一辅助设备成为控制必要条件，降级断言失败。 |
 | A20 | 配置 CRC/版本 | 有效配置能载入；篡改任一字节或版本后返回校准缺失 | CRC 被忽略或旧版本被直接接受，断言失败。 |
 | A21 | API 依赖 | 静态搜索或链接依赖显示 BSP→Driver→Service→Control→Application | Driver 反向调用 Service 或 Control 直接引用 GPIO/UART，断言失败。 |
 | A22 | 满电与负载供电 | 8.4V 电池输入下完成左右轮交替加减速，核心板不复位；5V 轨保持 4.75-5.25V，3.3V 轨保持 3.17-3.43V，TB6612 和 AMS1117 不触发热保护 | 功率地与逻辑地错误共用回流、稳压输出不足或输入跌落后仍宣称通过，断言失败。 |
@@ -827,7 +826,7 @@ OLED 使用 I2C2 `0x3C`，显示快照而非可写控制入口。刷新可以失
 
 - 本文件覆盖硬件清单序号 1-44，所有物料都有状态和用途。
 - 主设备采用单块 STM32F103C8T6、单块 TB6612FNG、两块 MG310P20、一个 LF04、一个可选 MPU6050、一个可选 OLED 和一个可选 HC-05。
-- ST-Link 只在烧录模式使用 3.3V 唯一目标电源；电池运行、Type-C、ST-Link 的目标电源互斥以及 CH340 不接目标 VCC 的规则已写入正文。
+- ST-Link 只在烧录模式使用 3.3V 唯一目标电源；电池运行、Type-C、ST-Link 的目标电源互斥规则已写入正文。
 - LF04 原始电平、黑线掩码、语义状态三层定义和 `0000`/`1111` 区分已写入正文。
 - API 统一使用 ms、mm、mm/s、mdeg、mdeg/s 和 PWM 权限 -1000..1000。
 - 本文件不要求通过修改 `.ioc` 或厂商 HAL 来实现驱动；任何后续外设配置变更仍须独立验证并明确记录。

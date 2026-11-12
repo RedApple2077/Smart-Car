@@ -156,18 +156,18 @@ const char *fake_bench_tx_at(size_t index)
   return s_tx[index];
 }
 
-sc_uart_status_t sc_uart_init(sc_uart_port_t port, uint32_t baud)
+sc_uart_status_t sc_uart_init(uint32_t baud, uint8_t rx_enable)
 {
-  (void)port;
   (void)baud;
+  (void)rx_enable;
   return SC_UART_OK;
 }
 
-sc_uart_status_t sc_uart_write(sc_uart_port_t port, const char *text)
+sc_uart_status_t sc_uart_write(const char *text)
 {
   size_t length;
 
-  if ((port != SC_UART_USART2) || (text == NULL))
+  if (text == NULL)
   {
     return SC_UART_ERR_ARGUMENT;
   }
@@ -182,13 +182,12 @@ sc_uart_status_t sc_uart_write(sc_uart_port_t port, const char *text)
   return SC_UART_OK;
 }
 
-sc_uart_status_t sc_uart_read(sc_uart_port_t port, uint8_t *dst,
-                              size_t capacity, size_t *received)
+sc_uart_status_t sc_uart_read(uint8_t *dst, size_t capacity,
+                              size_t *received)
 {
   size_t count = 0u;
 
-  if ((port != SC_UART_USART2) || (dst == NULL) ||
-      (received == NULL))
+  if ((dst == NULL) || (received == NULL))
   {
     return SC_UART_ERR_ARGUMENT;
   }
@@ -201,10 +200,9 @@ sc_uart_status_t sc_uart_read(sc_uart_port_t port, uint8_t *dst,
   return SC_UART_OK;
 }
 
-sc_uart_status_t sc_uart_get_stats(sc_uart_port_t port,
-                                   sc_uart_stats_t *stats)
+sc_uart_status_t sc_uart_get_stats(sc_uart_stats_t *stats)
 {
-  if ((port != SC_UART_USART2) || (stats == NULL))
+  if (stats == NULL)
   {
     return SC_UART_ERR_ARGUMENT;
   }

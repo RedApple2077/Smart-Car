@@ -156,7 +156,7 @@ static void sc_bt_bench_writer_finish(sc_bt_bench_writer_t *writer)
 
 static void sc_bt_bench_send(const char *text)
 {
-  (void)sc_uart_write(SC_UART_USART2, text);
+  (void)sc_uart_write(text);
 }
 
 static void sc_bt_bench_reset_parser(void)
@@ -737,7 +737,7 @@ void sc_bt_bench_init(uint32_t now_ms)
   s_motor_deadline_ms = 0u;
   s_next_heartbeat_ms = now_ms + SC_BT_BENCH_HEARTBEAT_MS;
   (void)sc_tb6612_set_standby(0u);
-  if (sc_uart_get_stats(SC_UART_USART2, &s_uart_stats) != SC_UART_OK)
+  if (sc_uart_get_stats(&s_uart_stats) != SC_UART_OK)
   {
     s_uart_stats = (sc_uart_stats_t){0};
   }
@@ -760,7 +760,7 @@ void sc_bt_bench_service(uint32_t now_ms)
     return;
   }
 
-  if (sc_uart_get_stats(SC_UART_USART2, &current_stats) != SC_UART_OK)
+  if (sc_uart_get_stats(&current_stats) != SC_UART_OK)
   {
     sc_bt_bench_uart_fault();
     return;
@@ -799,8 +799,7 @@ void sc_bt_bench_service(uint32_t now_ms)
 
   while (total_received < SC_BT_BENCH_RX_BUDGET)
   {
-    if (sc_uart_read(SC_UART_USART2, chunk, sizeof(chunk),
-                     &received) != SC_UART_OK)
+    if (sc_uart_read(chunk, sizeof(chunk), &received) != SC_UART_OK)
     {
       sc_bt_bench_uart_fault();
       return;

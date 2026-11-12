@@ -41,6 +41,7 @@ set(SC_MOTOR_TEST_CASES
     tb_config_reject
     tb_apply_uninitialized_no_tim
     tb_scaling_same_direction
+    tb_zero_same_direction_fast_path
     tb_zero_high_impedance
     tb_out_of_range_safe_fault
     tb_set_standby_clear_sequence

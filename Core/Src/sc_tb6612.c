@@ -316,8 +316,7 @@ sc_tb6612_status_t sc_tb6612_apply(int16_t left_permille,
   left_direction = sc_tb6612_command_direction(left_permille);
   right_direction = sc_tb6612_command_direction(right_permille);
 
-  if ((left_direction != 0) && (right_direction != 0) &&
-      (left_direction == sc_tb6612_command_direction(
+  if ((left_direction == sc_tb6612_command_direction(
         s_state.left_command)) &&
       (right_direction == sc_tb6612_command_direction(
         s_state.right_command)))

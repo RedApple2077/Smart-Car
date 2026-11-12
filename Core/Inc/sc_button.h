@@ -36,6 +36,12 @@ typedef enum {
   SC_BUTTON_EVENT_LONG_PRESS = (1u << 2)
 } sc_button_event_t;
 
+/*
+ * 初始化时稳定态直接取当前原始电平。若上电时按键已经按下，随后第一次
+ * 释放会返回 RELEASED 但没有前置 PRESSED；应用只能把一次
+ * PRESSED -> RELEASED 序列识别为新的短按。
+ */
+
 /* Exported functions prototypes ---------------------------------------------*/
 sc_button_status_t sc_button_init(void);
 uint8_t sc_button_poll(uint32_t now_ms);

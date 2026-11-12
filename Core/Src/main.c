@@ -30,6 +30,7 @@
 #include "sc_lf04.h"
 #include "sc_line_service.h"
 #include "sc_mpu6050.h"
+#include "sc_safety.h"
 #include "sc_ssd1306.h"
 #include "sc_tb6612.h"
 #include "sc_track.h"
@@ -58,7 +59,6 @@ TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
-UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
@@ -68,6 +68,7 @@ static uint32_t s_tracking_start_ms;
 static int64_t s_tracking_start_left_count;
 static int64_t s_tracking_start_right_count;
 static sc_track_controller_t s_track_controller;
+static uint8_t s_button_press_seen;
 #endif
 
 /* USER CODE END PV */
@@ -79,7 +80,6 @@ static void MX_I2C2_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
-static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -106,8 +106,15 @@ static void sc_tracking_service(uint32_t now_ms, uint8_t button_events)
 
   if ((button_events & SC_BUTTON_EVENT_LONG_PRESS) != 0u)
   {
+    s_button_press_seen = 0u;
     sc_tracking_stop();
     return;
+  }
+
+  if (((button_events & SC_BUTTON_EVENT_PRESSED) != 0u) &&
+      (s_tracking_active == 0u))
+  {
+    s_button_press_seen = 1u;
   }
 
   if (s_tracking_active == 0u)
@@ -116,6 +123,11 @@ static void sc_tracking_service(uint32_t now_ms, uint8_t button_events)
     {
       return;
     }
+    if (s_button_press_seen == 0u)
+    {
+      return;
+    }
+    s_button_press_seen = 0u;
     sc_track_controller_init(&s_track_controller);
     if ((sc_line_service_get_latest(&line) != SC_LINE_OK) ||
         (sc_encoder_get_latest(&encoder) != SC_ENCODER_OK) ||
@@ -210,13 +222,15 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
-  MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  /* CubeMX 生成的 MX_USARTx_UART_Init() 是平台启动前提，失败由生成函数进入
-     Error_Handler；此处仅忽略 sc_uart_init() 的驱动绑定/接收挂接失败。 */
-  (void)sc_uart_init(SC_UART_USART1, 115200u);
-  (void)sc_uart_init(SC_UART_USART2, 9600u);
+  /* CubeMX 生成的 MX_USART2_UART_Init() 是平台启动前提，失败由生成函数进入
+     Error_Handler；正式固件不挂接收，只有 Bench 固件启用 HC-05 入站。 */
+#if SC_BUILD_HC05_BENCH
+  (void)sc_uart_init(9600u, 1u);
+#else
+  (void)sc_uart_init(9600u, 0u);
+#endif
 
   /* PB5 上拉输入、PB9 推挽输出；STBY/PWM/方向脚已由 MX_GPIO_Init 置为安全电平。 */
   if (sc_led_init() != SC_LED_OK)
@@ -518,39 +532,6 @@ static void MX_TIM4_Init(void)
 }
 
 /**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART1_Init 0 */
-
-  /* USER CODE END USART1_Init 0 */
-
-  /* USER CODE BEGIN USART1_Init 1 */
-
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
-
-}
-
-/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -646,6 +627,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  sc_safety_emergency_stop();
   __disable_irq();
   while (1)
   {

@@ -40,8 +40,8 @@ sc_button_status_t sc_button_init(void)
   HAL_GPIO_Init(START_BTN_GPIO_Port, &gpio);
 
   s_button.raw_pressed = sc_button_read_pressed();
-  s_button.stable_pressed = 0u;
-  s_button.long_reported = 0u;
+  s_button.stable_pressed = s_button.raw_pressed;
+  s_button.long_reported = s_button.raw_pressed;
   s_button.raw_change_ms = HAL_GetTick();
   s_button.press_ms = s_button.raw_change_ms;
 
