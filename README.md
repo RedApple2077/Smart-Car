@@ -91,6 +91,10 @@ Bench 固件通过 USART2 与 HC-05 通信，串口参数为 `9600 8N1`。支持
 - `LINE` / `LF`：LF04 原始电平、掩码和线路语义。
 - `ARM`：打开 5 秒布防窗口。
 - `MOTOR <L|R> <±150> <100-2000>`：单轮受限测试。
+- `RAW <L|R|B> <pwm> <100-2000>`：开环辨识，`abs(pwm)<=564`，必须 ARM，自动停止。
+- `SPEED <L|R|B> <mm_s> <100-2000>`：闭环速度实验，`abs(mm_s)<=500`，必须 ARM 且 Wheel 反馈有效。
+- `PID <L|R|B> <kp_milli> <ki_milli> <kd_milli>`：仅停止且未布防时修改 RAM 增益；范围 `±10000`，保留各侧 ff。
+- `CAPTURE`：停轮后导出最近一次 MOTOR/RAW/SPEED 的 100 Hz 样本，分块非阻塞发送。
 - `STOP`：立即零输出并撤销 STBY。
 - `RESET`：停止状态下重置编码器计数。
 - `HELP`：命令列表。
@@ -99,11 +103,13 @@ Windows 工具示例：
 
 ```powershell
 pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action Probe
-pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action Line
 pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action DirectionMatrix -ExecuteMotion
+pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Identify
+pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action SetPid -Wheel B -KpMilli 100 -KiMilli 10 -KdMilli 0
+pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 200
 ```
 
-实际 COM 口以设备管理器为准。`DirectionMatrix` 会驱动真实电机，只能在双轮悬空、电池和 ST-Link 已互斥连接时使用。
+`sc_hc05_tune.ps1` 必须查询到名称匹配 `HC-05`、`Bluetooth` 或 `Standard Serial over Bluetooth` 的 SPP COM 设备；无法查询、名称不匹配或 CH340/USB 串口都会被拒绝。CAPTURE 导出窗口统一至少 30s，覆盖 201 行约 80 B/行在 9600 8N1 下的约 17s 传输。Identify 任一轮左右速度为非正，或左右三轮相对离散度任一超过 10% 时，只保留原始结果并给出 warning，不输出 cruise/ff 建议。日志只写到 `build/tune-logs`。实际 COM 口以设备管理器为准。所有运动命令都会驱动真实电机，只能在双轮悬空、电池和 ST-Link 已互斥连接时使用。PID 命令只改掉电即丢失的 RAM 参数，不修改源码或两个 VALID 标志。
 
 ## 验证状态
 
@@ -114,27 +120,27 @@ pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action DirectionMatrix -ExecuteMotion
 - Safety：3/3，缺陷变体 1/1；覆盖紧急停机和 IWDG 更新超时。
 - Wheel Service：8/8，缺陷变体 6/6。
 - PID：6/6，缺陷变体 4/4。
-- 双轮速度控制：9/9，缺陷变体 6/6。
+- 双轮速度控制：10/10，缺陷变体 7/7。
 - 循迹目标策略：13/13，缺陷变体 7/7。
 - I2C2/MPU6050/SSD1306：15/15，缺陷变体 13/13。
 - TB6612/编码器：24/24，缺陷变体 18/18。
 - LF04/线路语义：13/13，缺陷变体 11/11。
-- HC-05 Bench：31/31，缺陷变体 13/13。
+- HC-05 Bench：39/39，缺陷变体 18/18。
 - App：24/24，缺陷变体 10/10。
 - Telemetry：8/8，缺陷变体 5/5。
-- 全量 13 个主机测试套件共 170/170 通过。
-- App、Track、Telemetry、Safety 通过主机 GCC `-fanalyzer`，无分析告警。
+- 全量 13 个主机测试套件共 179/179 通过。
+- Speed Controller、Bench、App、Track、Telemetry、Safety 通过主机 GCC `-fanalyzer`，无分析告警。
 - Debug、Release、Bench 均通过交叉编译。
 
 最终资源占用：
 
-| 预设 | RAM | Flash | 相对 HEAD `9b10d86` |
+| 预设 | RAM | Flash | 相对上一版 |
 |---|---:|---:|---|
-| Debug | `5192 B` | `58804 B` | `+984 B` / `+16836 B` |
-| Release | `5184 B` | `31424 B` | `+992 B` / `+8560 B` |
-| Bench | `4496 B` | `47724 B` | `0 B` / `+176 B` |
+| Debug | `5192 B` | `58804 B` | `0 B` / `0 B` |
+| Release | `5184 B` | `31424 B` | `0 B` / `0 B` |
+| Bench | `12480 B` | `59608 B` | `+7984 B` / `+11884 B` |
 
-Release ELF 含 `sc_app_*`、`sc_telemetry_*`、`sc_safety_iwdg_*`，不含 `sc_bt_bench_*` 符号或 `OK PONG`/`OK MOTOR` 等台架命令字符串；Bench ELF 保留 `sc_bt_bench_*` 和命令字符串。资源差值相对分支起点 HEAD，包含当前未提交的循迹目标重构与正式 App/Telemetry 接入。
+资源差值为第四阶段相对上一版的变化。Release ELF 含 `sc_app_*`、`sc_telemetry_*`、`sc_safety_iwdg_*`，不含 CAPTURE 缓冲、RX 命令解析、`sc_bt_bench_*` 或 `RAW/SPEED/PID/CAPTURE` 命令字符串；Bench ELF 保留完整调参命令与捕获缓冲。
 
 已完成的硬件台架项：
 
@@ -178,7 +184,7 @@ ctest --test-dir build/host-sc-line --output-on-failure
 
 ## 后续工作
 
-1. 实现下一阶段 Bench 调参命令，再在抬轮受控实验中确认左右编码器方向、1040 count/rev、48 mm 轮径和电机符号。
-2. 记录开环阶跃与闭环响应，完成可追溯的低速 PID 实验；通过前保持两个 VALID 常量为 0。
+1. 在抬轮受控台架中使用 `sc_hc05_tune.ps1` 完成 3 轮 Identify，确认编码器方向、1040 count/rev、48 mm 轮径和电机符号。
+2. 使用 RAW/SPEED/PID/CAPTURE 记录可追溯开环与闭环响应，完成低速 PID 实验；通过前保持两个 VALID 常量为 0。
 3. 在完整比赛赛道复测当前循迹参数，并固定 LF04 安装高度和阈值。
 4. 完成整车供电、长时间运行、温升、IWDG 复位可见性和比赛赛道测试。

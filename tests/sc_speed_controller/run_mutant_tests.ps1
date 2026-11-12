@@ -178,6 +178,19 @@ try {
 '@ `
     -TestName "zero_target_and_stop"
 
+  Invoke-Mutant -Name "active_pid_update_allowed" `
+    -Original @'
+  if ((controller->mode != SC_SPEED_CONTROLLER_MODE_STOPPED) ||
+      (controller->left.applied_permille != 0) ||
+      (controller->right.applied_permille != 0) ||
+      (controller->left.target_ramped_mm_s != 0) ||
+      (controller->right.target_ramped_mm_s != 0))
+'@ `
+    -Replacement @'
+  if (0)
+'@ `
+    -TestName "pid_update_requires_stopped_and_bounds"
+
   Write-Host ("MUTANT SUMMARY: baseline passed; {0}/{0} mutants failed target tests" -f $mutantCount)
 }
 finally {

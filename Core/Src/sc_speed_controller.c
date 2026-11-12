@@ -115,6 +115,22 @@ static sc_pid_status_t sc_speed_init_side_pid(
   return sc_pid_init(&side->pid, &pid_gains);
 }
 
+static uint8_t sc_speed_gain_valid(int32_t gain_milli)
+{
+  return (uint8_t)((gain_milli >= -SC_SPEED_GAIN_LIMIT_MILLI) &&
+                   (gain_milli <= SC_SPEED_GAIN_LIMIT_MILLI));
+}
+
+static uint8_t sc_speed_gains_valid(const sc_speed_gains_t *gains)
+{
+  return (uint8_t)(
+    (gains != NULL) &&
+    sc_speed_gain_valid(gains->kp_milli) &&
+    sc_speed_gain_valid(gains->ki_milli) &&
+    sc_speed_gain_valid(gains->kd_milli) &&
+    sc_speed_gain_valid(gains->ff_milli));
+}
+
 static sc_speed_controller_status_t sc_speed_apply_side(
   sc_speed_controller_side_t *side, const sc_speed_gains_t *gains,
   int32_t requested_target_mm_s, int32_t measurement_mm_s,
@@ -223,6 +239,79 @@ sc_speed_controller_status_t sc_speed_controller_stop(
   sc_speed_controller_output_t *output)
 {
   return sc_speed_controller_reset(controller, output);
+}
+
+sc_speed_controller_status_t sc_speed_controller_update_pid(
+  sc_speed_controller_t *controller, uint8_t side_mask,
+  int32_t kp_milli, int32_t ki_milli, int32_t kd_milli)
+{
+  sc_speed_controller_config_t updated_config;
+  sc_pid_t updated_left_pid;
+  sc_pid_t updated_right_pid;
+  sc_pid_gains_t pid_gains;
+
+  if ((controller == NULL) || (side_mask == 0u) ||
+      ((side_mask & (uint8_t)~SC_SPEED_CONTROLLER_SIDE_BOTH) != 0u))
+  {
+    return SC_SPEED_CONTROLLER_ERR_ARGUMENT;
+  }
+  if (controller->initialized == 0u)
+  {
+    return SC_SPEED_CONTROLLER_ERR_NOT_READY;
+  }
+  if ((controller->mode != SC_SPEED_CONTROLLER_MODE_STOPPED) ||
+      (controller->left.applied_permille != 0) ||
+      (controller->right.applied_permille != 0) ||
+      (controller->left.target_ramped_mm_s != 0) ||
+      (controller->right.target_ramped_mm_s != 0))
+  {
+    return SC_SPEED_CONTROLLER_ERR_CONFIG;
+  }
+  if ((!sc_speed_gain_valid(kp_milli)) ||
+      (!sc_speed_gain_valid(ki_milli)) ||
+      (!sc_speed_gain_valid(kd_milli)))
+  {
+    return SC_SPEED_CONTROLLER_ERR_CONFIG;
+  }
+
+  updated_config = controller->config;
+  if ((side_mask & SC_SPEED_CONTROLLER_SIDE_LEFT) != 0u)
+  {
+    updated_config.left.kp_milli = kp_milli;
+    updated_config.left.ki_milli = ki_milli;
+    updated_config.left.kd_milli = kd_milli;
+  }
+  if ((side_mask & SC_SPEED_CONTROLLER_SIDE_RIGHT) != 0u)
+  {
+    updated_config.right.kp_milli = kp_milli;
+    updated_config.right.ki_milli = ki_milli;
+    updated_config.right.kd_milli = kd_milli;
+  }
+  if ((!sc_speed_gains_valid(&updated_config.left)) ||
+      (!sc_speed_gains_valid(&updated_config.right)))
+  {
+    return SC_SPEED_CONTROLLER_ERR_CONFIG;
+  }
+
+  pid_gains.kp_milli = updated_config.left.kp_milli;
+  pid_gains.ki_milli = updated_config.left.ki_milli;
+  pid_gains.kd_milli = updated_config.left.kd_milli;
+  if (sc_pid_init(&updated_left_pid, &pid_gains) != SC_PID_OK)
+  {
+    return SC_SPEED_CONTROLLER_ERR_CONFIG;
+  }
+  pid_gains.kp_milli = updated_config.right.kp_milli;
+  pid_gains.ki_milli = updated_config.right.ki_milli;
+  pid_gains.kd_milli = updated_config.right.kd_milli;
+  if (sc_pid_init(&updated_right_pid, &pid_gains) != SC_PID_OK)
+  {
+    return SC_SPEED_CONTROLLER_ERR_CONFIG;
+  }
+
+  controller->config = updated_config;
+  controller->left.pid = updated_left_pid;
+  controller->right.pid = updated_right_pid;
+  return SC_SPEED_CONTROLLER_OK;
 }
 
 sc_speed_controller_status_t sc_speed_controller_step(

@@ -41,6 +41,7 @@ foreach(test_case IN ITEMS
     duplicate_feedback_is_bumpless
     invalid_or_stale_feedback
     defaults_are_explicitly_unverified
+    pid_update_requires_stopped_and_bounds
     argument_validation
 )
     add_test(NAME "${test_case}"

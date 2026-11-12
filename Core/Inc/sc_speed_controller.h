@@ -21,6 +21,11 @@ extern "C" {
 #define SC_SPEED_OUTPUT_LIMIT_PERMILLE   564
 #define SC_SPEED_OUTPUT_RAMP_PERMILLE_S  8000
 #define SC_SPEED_TARGET_RAMP_MM_S2       2000
+#define SC_SPEED_GAIN_LIMIT_MILLI        10000
+#define SC_SPEED_CONTROLLER_SIDE_LEFT    0x01u
+#define SC_SPEED_CONTROLLER_SIDE_RIGHT   0x02u
+#define SC_SPEED_CONTROLLER_SIDE_BOTH \
+  (SC_SPEED_CONTROLLER_SIDE_LEFT | SC_SPEED_CONTROLLER_SIDE_RIGHT)
 
 typedef enum {
   SC_SPEED_CONTROLLER_OK = 0,
@@ -92,6 +97,15 @@ sc_speed_controller_status_t sc_speed_controller_reset(
 sc_speed_controller_status_t sc_speed_controller_stop(
   sc_speed_controller_t *controller,
   sc_speed_controller_output_t *output);
+
+/**
+  * @brief  仅在 STOPPED 且无活动输出时更新选定侧的 Kp/Ki/Kd RAM 参数。
+  *         ff 保留原值；增益绝对值不得超过 SC_SPEED_GAIN_LIMIT_MILLI。
+  *         该接口不写入非易失存储，也不改变 VALID 标志。
+  */
+sc_speed_controller_status_t sc_speed_controller_update_pid(
+  sc_speed_controller_t *controller, uint8_t side_mask,
+  int32_t kp_milli, int32_t ki_milli, int32_t kd_milli);
 
 /**
   * @brief  使用新且有效的 Wheel Service 快照推进双轮速度控制。

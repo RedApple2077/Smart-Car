@@ -15,11 +15,23 @@ set(SC_LINE_SERVICE_SOURCE
 set(SC_BT_BENCH_SOURCE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sc_bt_bench.c"
     CACHE FILEPATH "sc_bt_bench.c integration source")
+set(SC_WHEEL_SERVICE_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sc_wheel_service.c"
+    CACHE FILEPATH "sc_wheel_service.c integration source")
+set(SC_PID_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sc_pid.c"
+    CACHE FILEPATH "sc_pid.c integration source")
+set(SC_SPEED_CONTROLLER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sc_speed_controller.c"
+    CACHE FILEPATH "sc_speed_controller.c integration source")
 
 add_executable(sc_line_tests
     "${SC_LF04_SOURCE}"
     "${SC_LINE_SERVICE_SOURCE}"
     "${SC_BT_BENCH_SOURCE}"
+    "${SC_WHEEL_SERVICE_SOURCE}"
+    "${SC_PID_SOURCE}"
+    "${SC_SPEED_CONTROLLER_SOURCE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/fake/fake_support.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sc_line.c"
 )

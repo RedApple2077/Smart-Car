@@ -15,7 +15,7 @@ extern "C" {
 
 #include <stdint.h>
 
-#define SC_BT_BENCH_MAX_LINE_BYTES 48u
+#define SC_BT_BENCH_MAX_LINE_BYTES 64u
 #define SC_BT_BENCH_ARM_WINDOW_MS  5000u
 
 /**

@@ -363,6 +363,66 @@ static int test_defaults_are_explicitly_unverified(void)
   return 0;
 }
 
+static int test_pid_update_requires_stopped_and_bounds(void)
+{
+  sc_speed_controller_config_t config =
+    controller_config(gains(100, 10, 1, 1234),
+                      gains(200, 20, 2, 5678));
+  sc_speed_controller_t controller;
+  sc_speed_controller_output_t output;
+
+  CHECK(sc_speed_controller_init(&controller, &config) ==
+        SC_SPEED_CONTROLLER_OK);
+  CHECK(sc_speed_controller_update_pid(
+          &controller, SC_SPEED_CONTROLLER_SIDE_LEFT,
+          300, 30, 3) == SC_SPEED_CONTROLLER_OK);
+  CHECK(controller.config.left.kp_milli == 300);
+  CHECK(controller.config.left.ki_milli == 30);
+  CHECK(controller.config.left.kd_milli == 3);
+  CHECK(controller.config.left.ff_milli == 1234);
+  CHECK(controller.config.right.kp_milli == 200);
+  CHECK(controller.config.right.ki_milli == 20);
+  CHECK(controller.config.right.kd_milli == 2);
+  CHECK(controller.config.right.ff_milli == 5678);
+
+  CHECK(sc_speed_controller_update_pid(
+          &controller, SC_SPEED_CONTROLLER_SIDE_BOTH,
+          -10, -20, -30) == SC_SPEED_CONTROLLER_OK);
+  CHECK(controller.config.left.kp_milli == -10);
+  CHECK(controller.config.left.ki_milli == -20);
+  CHECK(controller.config.left.kd_milli == -30);
+  CHECK(controller.config.left.ff_milli == 1234);
+  CHECK(controller.config.right.kp_milli == -10);
+  CHECK(controller.config.right.ki_milli == -20);
+  CHECK(controller.config.right.kd_milli == -30);
+  CHECK(controller.config.right.ff_milli == 5678);
+
+  CHECK(sc_speed_controller_update_pid(
+          &controller, SC_SPEED_CONTROLLER_SIDE_LEFT,
+          SC_SPEED_GAIN_LIMIT_MILLI + 1, 0, 0) ==
+        SC_SPEED_CONTROLLER_ERR_CONFIG);
+  CHECK(sc_speed_controller_update_pid(
+          &controller, 0u, 1, 1, 1) ==
+        SC_SPEED_CONTROLLER_ERR_ARGUMENT);
+  CHECK(sc_speed_controller_update_pid(
+          &controller, 0x80u, 1, 1, 1) ==
+        SC_SPEED_CONTROLLER_ERR_ARGUMENT);
+  controller.config.left.ff_milli = SC_SPEED_GAIN_LIMIT_MILLI + 1;
+  CHECK(sc_speed_controller_update_pid(
+          &controller, SC_SPEED_CONTROLLER_SIDE_LEFT,
+          1, 2, 3) == SC_SPEED_CONTROLLER_ERR_CONFIG);
+  controller.config.left.ff_milli = 1234;
+
+  CHECK(sc_speed_controller_set_mode(
+          &controller, SC_SPEED_CONTROLLER_MODE_RUNNING, &output) ==
+        SC_SPEED_CONTROLLER_OK);
+  CHECK(sc_speed_controller_update_pid(
+          &controller, SC_SPEED_CONTROLLER_SIDE_LEFT,
+          1, 2, 3) == SC_SPEED_CONTROLLER_ERR_CONFIG);
+  CHECK(controller.config.left.kp_milli == -10);
+  return 0;
+}
+
 static int test_argument_validation(void)
 {
   sc_speed_controller_config_t config =
@@ -411,6 +471,8 @@ static const test_case_t s_tests[] = {
   {"invalid_or_stale_feedback", test_invalid_or_stale_feedback},
   {"defaults_are_explicitly_unverified",
    test_defaults_are_explicitly_unverified},
+  {"pid_update_requires_stopped_and_bounds",
+   test_pid_update_requires_stopped_and_bounds},
   {"argument_validation", test_argument_validation}
 };
 

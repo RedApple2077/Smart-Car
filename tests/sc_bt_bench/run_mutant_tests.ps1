@@ -103,12 +103,16 @@ function New-MutantSource {
   )
 
   $utf8 = [Text.UTF8Encoding]::new($false)
-  $sourceText = [IO.File]::ReadAllText($benchSource, $utf8)
-  if (-not $sourceText.Contains($Original)) {
+  $sourceText = [IO.File]::ReadAllText(
+    $benchSource, $utf8).Replace("`r`n", "`n")
+  $normalizedOriginal = $Original.Replace("`r`n", "`n")
+  $normalizedReplacement = $Replacement.Replace("`r`n", "`n")
+  if (-not $sourceText.Contains($normalizedOriginal)) {
     throw "mutation anchor not found for $Name"
   }
 
-  $mutatedText = $sourceText.Replace($Original, $Replacement)
+  $mutatedText = $sourceText.Replace(
+    $normalizedOriginal, $normalizedReplacement)
   $mutantPath = Join-Path $temporaryRootResolved "$Name.c"
   [IO.File]::WriteAllText($mutantPath, $mutatedText, $utf8)
   return $mutantPath
@@ -196,6 +200,7 @@ try {
   if ((s_motor_active != 0u) &&
       sc_bt_bench_time_reached(now_ms, s_motor_deadline_ms))
   {
+    sc_bt_bench_capture_sample(now_ms);
     stop_status = sc_bt_bench_safe_stop();
     if (stop_status == SC_TB6612_OK)
     {
@@ -211,6 +216,7 @@ try {
     -Replacement @'
   if (0)
   {
+    sc_bt_bench_capture_sample(now_ms);
     stop_status = sc_bt_bench_safe_stop();
     if (stop_status == SC_TB6612_OK)
     {
@@ -375,6 +381,87 @@ try {
   }
 '@ `
     -TestName "line_invalid_snapshot_safe_stop"
+
+  Invoke-Mutant -Name "raw_limit_bypass" `
+    -Original @'
+      (!sc_bt_bench_parse_i32(tokens[2], -SC_BT_BENCH_RAW_MAX,
+                              SC_BT_BENCH_RAW_MAX, &pwm)) ||
+'@ `
+    -Replacement @'
+      (!sc_bt_bench_parse_i32(tokens[2],
+                              -SC_BT_BENCH_MOTOR_MAX_COMMAND,
+                              SC_BT_BENCH_MOTOR_MAX_COMMAND, &pwm)) ||
+'@ `
+    -TestName "raw_requires_arm_and_limits"
+
+  Invoke-Mutant -Name "speed_bypasses_arm" `
+    -Original @'
+  if ((s_armed == 0u) ||
+      sc_bt_bench_time_reached(now_ms, s_arm_deadline_ms))
+  {
+    sc_bt_bench_command_error("ERR ARM\r\n");
+    return;
+  }
+  if ((s_speed_ready == 0u) ||
+'@ `
+    -Replacement @'
+  if (0)
+  {
+    sc_bt_bench_command_error("ERR ARM\r\n");
+    return;
+  }
+  if ((s_speed_ready == 0u) ||
+'@ `
+    -TestName "speed_requires_arm_and_feedback"
+
+  Invoke-Mutant -Name "pid_active_write" `
+    -Original @'
+  if ((s_motor_active != 0u) || (s_armed != 0u) ||
+      (sc_tb6612_get_state(&tb_state) != SC_TB6612_OK) ||
+      (tb_state.enabled != 0u) ||
+      (tb_state.mode != SC_TB6612_MODE_STANDBY) ||
+      (s_speed_controller.mode != SC_SPEED_CONTROLLER_MODE_STOPPED))
+'@ `
+    -Replacement @'
+  (void)tb_state;
+  if (0)
+'@ `
+    -TestName "pid_ram_readback_and_state_gate"
+
+  Invoke-Mutant -Name "capture_io_error_ignored" `
+    -Original @'
+      if (status != SC_UART_OK)
+      {
+        s_last_fault_bits |= SC_BT_BENCH_FAULT_UART;
+        sc_bt_bench_uart_fault();
+        return sent;
+      }
+'@ `
+    -Replacement @'
+      if (0)
+      {
+        s_last_fault_bits |= SC_BT_BENCH_FAULT_UART;
+        sc_bt_bench_uart_fault();
+        return sent;
+      }
+'@ `
+    -TestName "capture_requires_stopped_and_uart_error_safe"
+
+  Invoke-Mutant -Name "capture_tx_full_drops_frame" `
+    -Original @'
+      if ((status == SC_UART_ERR_BUFFER_FULL) ||
+          (status == SC_UART_ERR_BUSY))
+      {
+        return sent;
+      }
+'@ `
+    -Replacement @'
+      if (0)
+      {
+        return sent;
+      }
+'@ `
+    -TestName "capture_tx_full_retries"
 
   Write-Host ("MUTANT SUMMARY: baseline passed; {0}/{0} mutants failed target tests" -f $mutantCount)
 }
