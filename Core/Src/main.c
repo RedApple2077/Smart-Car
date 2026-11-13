@@ -32,6 +32,7 @@
 #include "sc_mpu6050.h"
 #include "sc_ssd1306.h"
 #include "sc_tb6612.h"
+#include "sc_track.h"
 #include "sc_uart.h"
 /* USER CODE END Includes */
 
@@ -61,6 +62,13 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+#if !SC_BUILD_HC05_BENCH
+static uint8_t s_tracking_active;
+static uint32_t s_tracking_start_ms;
+static int64_t s_tracking_start_left_count;
+static int64_t s_tracking_start_right_count;
+static sc_track_controller_t s_track_controller;
+#endif
 
 /* USER CODE END PV */
 
@@ -79,6 +87,93 @@ static void MX_USART2_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+#if !SC_BUILD_HC05_BENCH
+#define SC_TRACK_MOTION_TIMEOUT_MS 2000u
+
+static void sc_tracking_stop(void)
+{
+  s_tracking_active = 0u;
+  (void)sc_tb6612_set_standby(0u);
+}
+
+static void sc_tracking_service(uint32_t now_ms, uint8_t button_events)
+{
+  sc_line_state_t line;
+  sc_encoder_snapshot_t encoder;
+  sc_track_command_t command;
+  sc_track_status_t track_status;
+
+  if ((button_events & SC_BUTTON_EVENT_LONG_PRESS) != 0u)
+  {
+    sc_tracking_stop();
+    return;
+  }
+
+  if (s_tracking_active == 0u)
+  {
+    if ((button_events & SC_BUTTON_EVENT_RELEASED) == 0u)
+    {
+      return;
+    }
+    sc_track_controller_init(&s_track_controller);
+    if ((sc_line_service_get_latest(&line) != SC_LINE_OK) ||
+        (sc_encoder_get_latest(&encoder) != SC_ENCODER_OK) ||
+        (encoder.valid == 0u))
+    {
+      sc_tracking_stop();
+      return;
+    }
+    track_status = sc_track_controller_step(&s_track_controller, &line,
+                                            now_ms, &command);
+    if ((track_status != SC_TRACK_OK) &&
+        (track_status != SC_TRACK_RECOVERING))
+    {
+      sc_tracking_stop();
+      return;
+    }
+    if (
+        (sc_tb6612_set_standby(1u) != SC_TB6612_OK))
+    {
+      sc_tracking_stop();
+      return;
+    }
+    s_tracking_active = 1u;
+    s_tracking_start_ms = now_ms;
+    s_tracking_start_left_count = encoder.left.total_count;
+    s_tracking_start_right_count = encoder.right.total_count;
+  }
+
+  if ((sc_line_service_get_latest(&line) != SC_LINE_OK) ||
+      (sc_encoder_get_latest(&encoder) != SC_ENCODER_OK) ||
+      (encoder.valid == 0u))
+  {
+    sc_tracking_stop();
+    return;
+  }
+  track_status = sc_track_controller_step(&s_track_controller, &line,
+                                          now_ms, &command);
+  if ((track_status != SC_TRACK_OK) &&
+      (track_status != SC_TRACK_RECOVERING))
+  {
+    sc_tracking_stop();
+    return;
+  }
+  if (((uint32_t)(now_ms - s_tracking_start_ms) >=
+       SC_TRACK_MOTION_TIMEOUT_MS) &&
+      ((encoder.left.total_count == s_tracking_start_left_count) &&
+       (encoder.right.total_count == s_tracking_start_right_count)))
+  {
+    sc_tracking_stop();
+    return;
+  }
+  if (sc_tb6612_apply(command.left_permille, command.right_permille) !=
+      SC_TB6612_OK)
+  {
+    sc_tracking_stop();
+  }
+}
+#endif
 
 /* USER CODE END 0 */
 
@@ -133,10 +228,13 @@ int main(void)
     Error_Handler();
   }
 
-  /* TB6612 初始化后保持 STBY 低，正式固件不主动发车。 */
-  (void)sc_tb6612_init();
-  (void)sc_encoder_init();
-  (void)sc_lf04_init();
+  /* TB6612 初始化后保持 STBY 低，短按按键才允许进入循迹。 */
+  if ((sc_tb6612_init() != SC_TB6612_OK) ||
+      (sc_encoder_init() != SC_ENCODER_OK) ||
+      (sc_lf04_init() != SC_LF04_OK))
+  {
+    Error_Handler();
+  }
 
 #if SC_BUILD_HC05_BENCH
   sc_bt_bench_init(HAL_GetTick());
@@ -172,10 +270,12 @@ int main(void)
     }
     (void)sc_line_service_update(&line_sample);
 
+    sc_encoder_service(now_ms);
 #if SC_BUILD_HC05_BENCH
     sc_bt_bench_service(now_ms);
+#else
+    sc_tracking_service(now_ms, sc_button_poll(now_ms));
 #endif
-    sc_encoder_service(now_ms);
     sc_mpu6050_service(now_ms);
     sc_ssd1306_service(now_ms);
     sc_uart_service();
