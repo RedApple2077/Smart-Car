@@ -177,7 +177,11 @@ static int test_status_fields(void)
   CHECK(strstr(response, "Ltarget=0") != NULL);
   CHECK(strstr(response, "Rspeed=0") != NULL);
   CHECK(strstr(response, "Lkp=100") != NULL);
-  CHECK(strstr(response, "Rff=1000") != NULL);
+  CHECK(strstr(response, "Lki=750") != NULL);
+  CHECK(strstr(response, "Lff=803") != NULL);
+  CHECK(strstr(response, "Rkp=100") != NULL);
+  CHECK(strstr(response, "Rki=750") != NULL);
+  CHECK(strstr(response, "Rff=803") != NULL);
   CHECK(strstr(response, "CAP=0") != NULL);
   CHECK(strstr(response, "PARAM=UNVERIFIED") != NULL);
   CHECK(fake_bench_standby_calls() == 0u);
@@ -1373,7 +1377,7 @@ static int test_speed_stall_zero_progress(void)
   fake_bench_clear_tx();
   fake_bench_clear_calls();
 
-  for (now_ms = 70u; now_ms <= 450u; now_ms += 10u)
+  for (now_ms = 70u; now_ms <= 550u; now_ms += 10u)
   {
     fake_bench_advance_encoder(now_ms, 0, 0);
     sc_bt_bench_service(now_ms);
@@ -1405,7 +1409,7 @@ static int test_pid_ram_readback_and_state_gate(void)
   CHECK(strstr(response, "Lkp=100") != NULL);
   CHECK(strstr(response, "Lki=20") != NULL);
   CHECK(strstr(response, "Lkd=3") != NULL);
-  CHECK(strstr(response, "Lff=1000") != NULL);
+  CHECK(strstr(response, "Lff=803") != NULL);
   CHECK(strstr(response, "Rkp=100") != NULL);
   CHECK(strstr(response, "PARAM=RAM_ONLY") != NULL);
 

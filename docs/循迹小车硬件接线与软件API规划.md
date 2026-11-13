@@ -10,7 +10,7 @@
 
 第二块 STM32F103C8T6、第二块 TB6612FNG、第二块 MPU6050 和第二个 HC-05 均作为备件。HC-SR04、SG90 云台和 PS/2 摇杆不进入比赛运行功能。面包板只用于原型验证，不作为比赛行驶时的可靠连接结构。
 
-本文定义硬件连接、硬件模块边界、可实现 C 接口和验收方法，不提供已验证 PID 增益。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART2 和相应 GPIO；设备驱动、非阻塞 Service、Wheel Service、双轮速度控制、循迹 `mm/s` 目标策略、正式 `sc_app` 安全状态机、IWDG、遥测/OLED 和独立 HC-05 Bench 已完成。三套固件均可构建，正式链与 Bench 保持隔离。
+本文定义硬件连接、硬件模块边界、可实现 C 接口和验收方法。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART2 和相应 GPIO；设备驱动、非阻塞 Service、Wheel Service、双轮速度控制、循迹 `mm/s` 目标策略、正式 `sc_app` 安全状态机、IWDG、遥测/OLED 和独立 HC-05 Bench 已完成。名义标定、双轮悬空条件下，200/478 mm/s 闭环阶跃已各连续完成三轮；该证据固化调参有效位，但不替代十圈里程计标定和整车赛道验收。三套固件均可构建，正式链与 Bench 保持隔离。
 
 ### 1.1 比赛边界
 
@@ -27,12 +27,12 @@
 - 不使用 HC-SR04、SG90 或 PS/2 摇杆完成比赛功能。
 - 不将 MPU6050 当作绝对航向源，不使用长期陀螺仪积分替代 LF04。
 - 不把 LF04 的离散死区输入描述为连续位置传感器。
-- 不在本文填写 PID 增益、丢线找回时长、比赛速度或停车延时。
+- 不把名义标定、双轮悬空台架通过的增益描述为整车负载或赛道性能已验证。
 - 不修改现有 CubeMX、HAL、CMake、源码或硬件原件。
 
 ### 1.3 当前工程事实
 
-以下事实核对于 2026-11-12。只记录当前配置、源码和已执行验证中可以确认的状态，不把驱动存在等同于设备在线、控制闭环或整车身验证已经完成。
+以下事实核对于 2026-11-13。只记录当前配置、源码和已执行验证中可以确认的状态，不把驱动存在等同于设备在线、控制闭环或整车身验证已经完成。
 
 - 工程路径：`C:\Users\RedApple\Documents\Smart-Car`。
 - 工程格式：STM32CubeMX 生成的 HAL 工程，CMake 构建，C11 标准。`CMakePresets.json` 提供 `Debug`、`Release` 和独立 `Bench` 预设，使用 Ninja 与 `cmake/gcc-arm-none-eabi.cmake` 工具链。
@@ -48,10 +48,10 @@
 - 电机与状态输出：`PA4/AIN1`、`PA5/AIN2`、`PB0/BIN1`、`PB1/BIN2`、`PB8/TB6612_STBY`、`PB9/STATUS_LED` 均为推挽输出。正式固件初始化 TB6612 后保持 STBY 低。
 - 正式主循环：每 10 ms 推进 LF04/线路语义；每轮服务编码器，仅在新 sequence 时进入 Wheel Service；仅在新的有效双轮反馈上推进速度控制；`sc_app` 应用启动门、状态机、故障检测和唯一执行器提交。遥测 Service 在核心控制之后推进，IWDG 在全部必要 Service 完成后最后喂狗。
 - Bench 主循环：保留原有 LF04、编码器、蓝牙命令、心跳、MPU、OLED、UART 和限时单轮控制；同样只使用 `sc_safety_iwdg_init/feed` 接入看门狗。
-- 正式/Bench 隔离：正式 Debug/Release 不链接 `sc_bt_bench`，不包含蓝牙运动命令；Bench 产物为 `build/Bench/Smart-Car-HC05Bench.elf`，提供 `PING/STATUS/LINE/LF/ARM/MOTOR/STOP/RESET/HELP`。
+- 正式/Bench 隔离：正式 Debug/Release 不链接 `sc_bt_bench`，不包含蓝牙运动命令；Bench 产物为 `build/Bench/Smart-Car-HC05Bench.elf`，提供 `PING/STATUS/LINE/LF/ARM/MOTOR/RAW/SPEED/PID/CAPTURE/STOP/RESET/HELP`。
 - 当前测试状态：UART 13/13 且缺陷变体 3/3；按键 3/3 且缺陷变体 1/1；Safety 3/3 且缺陷变体 1/1；Wheel Service 8/8 且缺陷变体 6/6；PID 6/6 且缺陷变体 4/4；双轮速度控制 10/10 且缺陷变体 7/7；循迹目标策略 13/13 且缺陷变体 7/7；I2C/MPU/OLED 15/15 且缺陷变体 13/13；TB6612/编码器 24/24 且缺陷变体 18/18；LF04/线路语义 13/13 且缺陷变体 11/11；App 24/24 且缺陷变体 10/10；Telemetry 8/8 且缺陷变体 5/5；Bench 50/50 且缺陷变体 28/28。全量 13 个主机套件共 190/190 个基线测试；Debug/Release/Bench 均通过交叉编译。
-- 当前硬件验证：TB6612 单轮短脉冲、左右通道隔离、自动停机、编码器计数和右电机方向纠正已完成台架验证；HC-05 SPP 已完成命令交互。MPU6050/OLED 的最终整车隔离、LF04 实物识别、双轮速度闭环、长稳、供电余量和赛道表现仍未验证。
-- 当前源码边界：正式闭环、应用安全状态机、故障恢复、IWDG、HC-05 5 Hz 遥测、2 Hz OLED、状态 LED、自动校零，以及 Bench 的 RAW/SPEED/PID/CAPTURE 已实现。持久化配置 Service 仍未实现；当前只有编译期默认参数与两个显式 VALID 标志。`SC_MOTOR_CALIBRATION_VALID` 和 `SC_MOTOR_TUNING_VALID` 必须保持 0，直到实物实验产生可追溯证据。
+- 当前硬件验证：TB6612 单轮短脉冲、左右通道隔离、自动停机、编码器计数和右电机方向纠正已完成台架验证；HC-05 SPP 已完成命令交互。名义标定、双轮悬空下，200/478 mm/s 各连续 3 轮 2 秒阶跃通过，每轮 201 个 100 Hz 样本且无饱和/fault。200 mm/s 的尾段 MAE 为 `0.825..6.6375 mm/s`、超调 `0..3%`、调节时间 `0.21..0.23 s`；478 mm/s 分别为 `10.2375..13.6875 mm/s`、`6.0669..8.5774%`、`0.30 s`。MPU6050/OLED 的最终整车隔离、十圈里程计标定、整车负载、长稳、供电余量和赛道表现仍未验证。
+- 当前源码边界：正式闭环、应用安全状态机、故障恢复、IWDG、HC-05 5 Hz 遥测、2 Hz OLED、状态 LED、自动校零，以及 Bench 的 RAW/SPEED/PID/CAPTURE 已实现。持久化配置 Service 仍未实现；当前配置来源为编译期常量。`SC_MOTOR_TUNING_VALID=1` 仅覆盖名义标定、双轮悬空、200/478 mm/s 各三轮阶跃；`SC_MOTOR_CALIBRATION_VALID=0`，等待十圈计数、方向和轮径人工核实。
 
 ## 2. 44 项物料状态表
 
@@ -685,7 +685,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 
 | API | 输入 | 返回/输出 | 责任边界 |
 |---|---|---|---|
-| `sc_app_get_default_config(config)` | 配置缓冲 | 无 | 从 `sc_motor_defaults.h` 装载轮径/计数、符号、巡航速度和 PID 占位值；两个 VALID 当前均为 0。 |
+| `sc_app_get_default_config(config)` | 配置缓冲 | 无 | 从 `sc_motor_defaults.h` 装载名义轮径/计数、符号、`478 mm/s` 巡航、`ff=803/kp=100/ki=750/kd=0` 和 VALID；调参有效为 1，标定有效为 0。 |
 | `sc_app_init(app, config, now_ms)` | App、配置、时间 | `sc_app_status_t` | 初始化核心 Driver/Wheel/PID/速度控制，进入 BOOT 后固定落到 IDLE；核心初始化或结构校验失败进入 FATAL FAULT 并紧急停机。 |
 | `sc_app_service(app, now_ms)` | App、时间 | `sc_app_status_t` | 执行 10 ms 线路采样、编码器 Service、新反馈速度控制、按键状态机、故障检测、恢复健康和唯一 TB6612 提交。 |
 | `sc_app_snapshot(app, snapshot)` | App、调用方缓冲 | `sc_app_status_t` | 复制只读快照：阶段、线路、编码器/Wheel、目标、控制器输出、经电机符号换算的 PWM、故障/降级、STBY、序号和时间。 |
@@ -715,7 +715,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 
 `degraded_bits` 单独记录 `IMU/DISPLAY/TELEMETRY`。MPU、OLED、HC-05 的初始化、刷新或入队失败只置对应降级位，不改变目标、PWM 或 STBY。OLED 异步 Service 后还必须读取状态和重试计数，不能只依赖 `write_line/refresh` 的同步返回。
 
-持久化配置结构未来必须包含 `magic`、`schema_version`、`payload_size` 和 `crc32`，但本阶段尚未实现 Flash Config Service。当前正式配置来源是 `sc_motor_defaults.h` 编译期常量；任何实际发车前都必须完成标定和调参并把两个 VALID 显式置 1。
+持久化配置结构未来必须包含 `magic`、`schema_version`、`payload_size` 和 `crc32`，但本阶段尚未实现 Flash Config Service。当前正式配置来源是 `sc_motor_defaults.h` 编译期常量。调参有效位已由 200/478 mm/s 台架证据置 1；标定有效仍为 0，十圈计数、方向和轮径核实完成前正式固件必须拒绝发车。
 
 本基线没有为电池电压分配 ADC 通道，因此不伪造“电池电压在线监测”能力。电源欠压由硬件复位和断电表现，软件重新启动后回到待命；上电前电压、极性和温升属于台架检查项。
 
@@ -749,7 +749,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 | `RESET` | 停止状态下重置编码器计数 | 运行或布防状态拒绝。 |
 | `HELP` | 输出命令列表 | 只读。 |
 
-Bench 固件同样依赖 STBY 安全序列和超时自动停机；它不进入 Debug/Release 正式产物。当前默认标定和 PID 来自 `sc_motor_defaults.h`，两个 VALID 仍为 0，因此 `STATUS` 和 RAW/SPEED 响应明确标记 `PARAM=UNVERIFIED`，仅表示受控台架实验参数。
+Bench 固件同样依赖 STBY 安全序列和超时自动停机；它不进入 Debug/Release 正式产物。当前默认增益来自 `sc_motor_defaults.h`，调参证据只覆盖名义标定、双轮悬空、200/478 mm/s 各三轮；标定仍待十圈核实。`STATUS` 和 RAW/SPEED 响应因此继续标记 `PARAM=UNVERIFIED` 作为整体保守标签，不表示本轮 PID 缺少台架数据。
 
 CAPTURE 行格式固定为：
 
@@ -762,7 +762,7 @@ pwm_l,pwm_r,fault_bits,controller_mode
 
 RAW 与 SPEED 的发车和运行期都要求双轮 feedback valid、样本年龄不超过 30 ms；运行中任一条件失效时不等待新 sequence，立即记录 FEEDBACK fault、保存捕获、拉低 STBY 并返回 `ERR FEEDBACK`。任一侧 `|实际TB命令|>=150` 时记录 300 ms 窗口起始物理计数、时间和目标。窗口到期后，RAW 要求沿实验命令方向至少净增 20 个计数，该值是尚未完成实车标定的保守安全门槛；SPEED 要求控制器命令与目标同号，并按目标、实际经过时间、轮径和每转计数计算理论计数，要求净进展至少 20%。目标或输出为 0 的一侧豁免。无足够进展时 SAFE STOP、置对应左/右堵转 fault、记录捕获并返回 `ERR STALL`。
 
-`tools/sc_hc05_tune.ps1` 只接受 `COMx + 9600 8N1`，且所有 Action（包括 Probe）都必须从 COM 设备 DeviceID 查询 ContainerId，并验证同一 PnP Container 中存在名称匹配 `HC[- ]?05` 的设备。ContainerId 不可查、同容器无 HC-05、CH340、普通 USB serial 或仅名称含 Bluetooth 的通道均拒绝运行。动作包括 `Probe`、`SetPid`、`Identify`、`Step`、`Capture`；日志固定写入 `build/tune-logs`，UTF-8 无 BOM。Capture/Identify/Step 的捕获导出窗口均至少 30s。工具解析 `OK CAPTURE BEGIN N=<count>`，要求 CAP 行数精确相等、时间戳严格递增、mode 一致；Identify 和 Step 还要求首末覆盖至少 90% 期望时长且 fault 全为 0。不完整或故障数据先保留原始日志/CSV再抛错，不生成速度、ff 或 PID 性能结论。Identify 默认执行 3 轮 `RESET -> ARM -> RAW B 396 1000 -> STOP -> CAPTURE`，丢弃每轮前 30%，对后 70% 求左右中位速度。任一轮 vL/vR 非正，或三轮左右相对离散度 `(max-min)/median` 任一超过 10%，summary 写 `repeatability_ok=false` 并保留原始结果但不输出 cruise/ff；全部通过才给出 `0.97*min(vL,vR)` 和每侧 ff 建议。工具不修改源码或 VALID 标志。
+`tools/sc_hc05_tune.ps1` 只接受 `COMx + 9600 8N1`，且所有 Action（包括 Probe）都必须从 COM 设备 DeviceID 查询 ContainerId，并验证同一 PnP Container 中存在名称匹配 `HC[- ]?05` 的设备。ContainerId 不可查、同容器无 HC-05、CH340、普通 USB serial 或仅名称含 Bluetooth 的通道均拒绝运行。动作包括 `Probe`、`SetPid`、`Identify`、`Step`、`Capture`；日志固定写入 `build/tune-logs`，UTF-8 无 BOM。Capture/Identify/Step 的捕获导出窗口均至少 30s。工具解析 `OK CAPTURE BEGIN N=<count>`，要求 CAP 行数精确相等、时间戳严格递增、mode 一致；Identify 和 Step 还要求首末覆盖至少 90% 期望时长且 fault 全为 0。不完整或故障数据先保留原始日志/CSV再抛错，不生成速度、ff 或 PID 性能结论。Identify 默认执行 3 轮 `RESET -> ARM -> RAW B 396 1000 -> STOP -> CAPTURE`，丢弃每轮前 30%，对后 70% 求左右中位速度。任一轮 vL/vR 非正，或三轮左右相对离散度 `(max-min)/median` 任一超过 10%，summary 写 `repeatability_ok=false` 并保留原始结果但不输出 cruise/ff；全部通过才给出 `0.97*min(vL,vR)` 和每侧 ff 建议。工具不修改源码或 VALID 标志；已固化值只能在重新完成受控验收后手工更新。
 
 ### 8.3 HC-05 遥测
 

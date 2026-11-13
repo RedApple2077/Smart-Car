@@ -40,7 +40,7 @@ foreach(test_case IN ITEMS
     first_feedback_wait
     duplicate_feedback_is_bumpless
     invalid_or_stale_feedback
-    defaults_are_explicitly_unverified
+    defaults_match_validated_bench_config
     pid_update_requires_stopped_and_bounds
     argument_validation
 )
