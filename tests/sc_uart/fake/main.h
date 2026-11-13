@@ -80,13 +80,10 @@ typedef struct {
 #define HAL_UART_ERROR_FE 0x00000004u
 #define HAL_UART_ERROR_ORE 0x00000008u
 
-extern USART_TypeDef fake_usart1_regs;
 extern USART_TypeDef fake_usart2_regs;
 
-#define USART1 (&fake_usart1_regs)
 #define USART2 (&fake_usart2_regs)
 
-extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 
 static inline uint32_t __get_PRIMASK(void)

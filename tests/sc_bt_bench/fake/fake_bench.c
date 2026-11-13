@@ -16,6 +16,7 @@ static sc_line_state_t s_line_state;
 static uint8_t s_fail_read;
 static uint8_t s_fail_stats;
 static uint8_t s_fail_write;
+static uint8_t s_full_write;
 static uint8_t s_fail_standby_enable;
 static uint8_t s_fail_standby_disable;
 static uint8_t s_fail_apply;
@@ -55,6 +56,7 @@ void fake_bench_reset(void)
   s_fail_read = 0u;
   s_fail_stats = 0u;
   s_fail_write = 0u;
+  s_full_write = 0u;
   s_fail_standby_enable = 0u;
   s_fail_standby_disable = 0u;
   s_fail_apply = 0u;
@@ -121,6 +123,11 @@ void fake_bench_fail_next_write(void)
   s_fail_write = 1u;
 }
 
+void fake_bench_full_next_write(void)
+{
+  s_full_write = 1u;
+}
+
 void fake_bench_fail_next_standby_enable(void)
 {
   s_fail_standby_enable = 1u;
@@ -176,6 +183,30 @@ sc_line_state_t *fake_bench_line_state(void)
   return &s_line_state;
 }
 
+void fake_bench_advance_encoder(uint32_t sample_time_ms,
+                                int32_t left_delta,
+                                int32_t right_delta)
+{
+  uint32_t interval_ms =
+    (s_encoder_snapshot.sequence == 0u) ? 0u :
+    (uint32_t)(sample_time_ms - s_encoder_snapshot.sample_time_ms);
+
+  s_encoder_snapshot.sequence++;
+  s_encoder_snapshot.sample_time_ms = sample_time_ms;
+  s_encoder_snapshot.interval_ms = interval_ms;
+  s_encoder_snapshot.left.total_count += left_delta;
+  s_encoder_snapshot.right.total_count += right_delta;
+  s_encoder_snapshot.left.raw_count =
+    (uint16_t)s_encoder_snapshot.left.total_count;
+  s_encoder_snapshot.right.raw_count =
+    (uint16_t)s_encoder_snapshot.right.total_count;
+  s_encoder_snapshot.left.delta_count = left_delta;
+  s_encoder_snapshot.right.delta_count = right_delta;
+  s_encoder_snapshot.left.valid = 1u;
+  s_encoder_snapshot.right.valid = 1u;
+  s_encoder_snapshot.valid = 1u;
+}
+
 uint32_t fake_bench_standby_calls(void)
 {
   return s_standby_calls;
@@ -216,18 +247,18 @@ void fake_bench_clear_calls(void)
   s_encoder_reset_calls = 0u;
 }
 
-sc_uart_status_t sc_uart_init(sc_uart_port_t port, uint32_t baud)
+sc_uart_status_t sc_uart_init(uint32_t baud, uint8_t rx_enable)
 {
-  (void)port;
   (void)baud;
+  (void)rx_enable;
   return SC_UART_OK;
 }
 
-sc_uart_status_t sc_uart_write(sc_uart_port_t port, const char *text)
+sc_uart_status_t sc_uart_write(const char *text)
 {
   size_t length;
 
-  if ((port != SC_UART_USART2) || (text == NULL))
+  if (text == NULL)
   {
     return SC_UART_ERR_ARGUMENT;
   }
@@ -235,6 +266,11 @@ sc_uart_status_t sc_uart_write(sc_uart_port_t port, const char *text)
   {
     s_fail_write = 0u;
     return SC_UART_ERR_HAL;
+  }
+  if (s_full_write != 0u)
+  {
+    s_full_write = 0u;
+    return SC_UART_ERR_BUFFER_FULL;
   }
   length = strlen(text);
   if ((s_tx_count >= FAKE_BENCH_TX_CAPACITY) ||
@@ -247,8 +283,7 @@ sc_uart_status_t sc_uart_write(sc_uart_port_t port, const char *text)
   return SC_UART_OK;
 }
 
-sc_uart_status_t sc_uart_write_bytes(sc_uart_port_t port,
-                                     const uint8_t *data, size_t len)
+sc_uart_status_t sc_uart_write_bytes(const uint8_t *data, size_t len)
 {
   char text[FAKE_BENCH_TX_LINE_SIZE];
 
@@ -258,16 +293,15 @@ sc_uart_status_t sc_uart_write_bytes(sc_uart_port_t port,
   }
   memcpy(text, data, len);
   text[len] = '\0';
-  return sc_uart_write(port, text);
+  return sc_uart_write(text);
 }
 
-sc_uart_status_t sc_uart_read(sc_uart_port_t port, uint8_t *dst,
-                              size_t capacity, size_t *received)
+sc_uart_status_t sc_uart_read(uint8_t *dst, size_t capacity,
+                              size_t *received)
 {
   size_t count = 0u;
 
-  if ((port != SC_UART_USART2) || (dst == NULL) ||
-      (received == NULL) || (s_fail_read != 0u))
+  if ((dst == NULL) || (received == NULL) || (s_fail_read != 0u))
   {
     s_fail_read = 0u;
     return SC_UART_ERR_HAL;
@@ -281,11 +315,9 @@ sc_uart_status_t sc_uart_read(sc_uart_port_t port, uint8_t *dst,
   return SC_UART_OK;
 }
 
-sc_uart_status_t sc_uart_get_stats(sc_uart_port_t port,
-                                   sc_uart_stats_t *stats)
+sc_uart_status_t sc_uart_get_stats(sc_uart_stats_t *stats)
 {
-  if ((port != SC_UART_USART2) || (stats == NULL) ||
-      (s_fail_stats != 0u))
+  if ((stats == NULL) || (s_fail_stats != 0u))
   {
     s_fail_stats = 0u;
     return SC_UART_ERR_HAL;

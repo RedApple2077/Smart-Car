@@ -1,9 +1,8 @@
 /**
   ******************************************************************************
   * @file    sc_uart.h
-  * @brief   USART1/USART2 非阻塞收发驱动。
-  *          USART1: PA9/PA10, CH340, 115200 8N1。
-  *          USART2: PA2/PA3, HC-05, 9600 8N1。
+  * @brief   HC-05/USART2 非阻塞收发驱动。
+  *          PA2/PA3, 9600 8N1。
   ******************************************************************************
   */
 
@@ -20,11 +19,6 @@ extern "C" {
 #include <stdint.h>
 
 /* Exported types ------------------------------------------------------------*/
-typedef enum {
-  SC_UART_USART1 = 1,
-  SC_UART_USART2 = 2
-} sc_uart_port_t;
-
 typedef enum {
   SC_UART_OK = 0,
   SC_UART_ERR_ARGUMENT,
@@ -50,37 +44,36 @@ typedef struct {
 
 /* Exported functions prototypes ---------------------------------------------*/
 /**
-  * @brief  校验并启用 CubeMX 已初始化的 UART。
+  * @brief  校验并启用 CubeMX 已初始化的 HC-05 UART。
   *         只校验 Instance、波特率、8N1、TX/RX 和无流控配置，不重复调用
-  *         HAL_UART_Init()。同端口同配置重复调用返回 OK，并保留队列和统计。
+  *         HAL_UART_Init()。rx_enable=0 时不挂接接收中断；rx_enable=1 时
+  *         启用单字节中断接收。正式固件传 0，HC-05 Bench 固件传 1。
   */
-sc_uart_status_t sc_uart_init(sc_uart_port_t port, uint32_t baud);
+sc_uart_status_t sc_uart_init(uint32_t baud, uint8_t rx_enable);
 
 /**
   * @brief  将零结尾字符串整次写入 TX 队列；不发送 '\0'、不添加换行。
   *         成功仅表示全部字节已入队，不表示远端已收到。
   */
-sc_uart_status_t sc_uart_write(sc_uart_port_t port, const char *text);
+sc_uart_status_t sc_uart_write(const char *text);
 
 /**
   * @brief  将指定字节整次写入 TX 队列；空间不足时整次拒绝。
   *         成功仅表示全部字节已入队，不表示远端已收到。
   */
-sc_uart_status_t sc_uart_write_bytes(sc_uart_port_t port,
-                                     const uint8_t *data, size_t len);
+sc_uart_status_t sc_uart_write_bytes(const uint8_t *data, size_t len);
 
 /**
   * @brief  非阻塞读取当前 RX 队列，返回不超过 capacity 的已有字节。
-  *         队列为空时返回 OK 且 received 为 0。
+  *         仅在初始化时 rx_enable=1 的端口上可用。
   */
-sc_uart_status_t sc_uart_read(sc_uart_port_t port, uint8_t *dst,
-                              size_t capacity, size_t *received);
+sc_uart_status_t sc_uart_read(uint8_t *dst, size_t capacity,
+                              size_t *received);
 
 /**
-  * @brief  获取指定端口的统计快照。
+  * @brief  获取 HC-05 UART 的统计快照。
   */
-sc_uart_status_t sc_uart_get_stats(sc_uart_port_t port,
-                                   sc_uart_stats_t *stats);
+sc_uart_status_t sc_uart_get_stats(sc_uart_stats_t *stats);
 
 /**
   * @brief  主循环服务函数，限频重试 RX 重挂和待发送队列。

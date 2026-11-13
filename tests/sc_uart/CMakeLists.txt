@@ -32,7 +32,9 @@ enable_testing()
 
 set(SC_UART_TEST_CASES
     init_and_idempotency
+    rx_enabled_init_idempotency
     init_config_errors
+    rx_disabled_ignores_rx_state
     tx_boundary
     tx_wrap
     tx_start_retry
@@ -40,7 +42,8 @@ set(SC_UART_TEST_CASES
     rx_wrap
     rx_error_ordering
     rx_error_recovery
-    dual_port_isolation
+    rx_disabled
+    rx_tx_independent
 )
 
 foreach(test_case IN LISTS SC_UART_TEST_CASES)

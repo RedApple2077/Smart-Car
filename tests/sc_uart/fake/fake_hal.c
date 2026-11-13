@@ -13,25 +13,18 @@ typedef struct {
   size_t history_len;
 } fake_port_state_t;
 
-USART_TypeDef fake_usart1_regs;
 USART_TypeDef fake_usart2_regs;
-UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
-static fake_port_state_t s_port1;
-static fake_port_state_t s_port2;
+static fake_port_state_t s_port;
 static uint32_t s_tick;
 
 static fake_port_state_t *fake_state_for_handle(
   const UART_HandleTypeDef *huart)
 {
-  if ((huart != NULL) && (huart->Instance == USART1))
-  {
-    return &s_port1;
-  }
   if ((huart != NULL) && (huart->Instance == USART2))
   {
-    return &s_port2;
+    return &s_port;
   }
   return NULL;
 }
@@ -59,10 +52,9 @@ static uint32_t fake_sr_mask_from_error(uint32_t error_code)
   return mask;
 }
 
-static void fake_configure_handle(UART_HandleTypeDef *huart,
-                                  USART_TypeDef *instance, uint32_t baud)
+static void fake_configure_handle(UART_HandleTypeDef *huart, uint32_t baud)
 {
-  huart->Instance = instance;
+  huart->Instance = USART2;
   huart->Init.BaudRate = baud;
   huart->Init.WordLength = UART_WORDLENGTH_8B;
   huart->Init.StopBits = UART_STOPBITS_1;
@@ -77,16 +69,12 @@ static void fake_configure_handle(UART_HandleTypeDef *huart,
 
 void fake_hal_reset(void)
 {
-  memset(&fake_usart1_regs, 0, sizeof(fake_usart1_regs));
   memset(&fake_usart2_regs, 0, sizeof(fake_usart2_regs));
-  memset(&huart1, 0, sizeof(huart1));
   memset(&huart2, 0, sizeof(huart2));
-  memset(&s_port1, 0, sizeof(s_port1));
-  memset(&s_port2, 0, sizeof(s_port2));
+  memset(&s_port, 0, sizeof(s_port));
   s_tick = 0u;
 
-  fake_configure_handle(&huart1, USART1, 115200u);
-  fake_configure_handle(&huart2, USART2, 9600u);
+  fake_configure_handle(&huart2, 9600u);
 }
 
 uint32_t HAL_GetTick(void)
@@ -169,12 +157,12 @@ HAL_StatusTypeDef HAL_UART_Receive_IT(UART_HandleTypeDef *huart,
 
 void fake_fail_next_transmit(HAL_StatusTypeDef status)
 {
-  s_port1.next_tx_failure = status;
+  s_port.next_tx_failure = status;
 }
 
 void fake_fail_next_receive(HAL_StatusTypeDef status)
 {
-  s_port1.next_rx_failure = status;
+  s_port.next_rx_failure = status;
 }
 
 uint32_t fake_transmit_call_count(const UART_HandleTypeDef *huart)

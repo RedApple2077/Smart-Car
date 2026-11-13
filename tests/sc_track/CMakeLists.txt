@@ -6,8 +6,12 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-add_executable(sc_track_tests
+set(SC_TRACK_SOURCE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sc_track.c"
+    CACHE FILEPATH "sc_track.c under test")
+
+add_executable(sc_track_tests
+    "${SC_TRACK_SOURCE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sc_track.c"
 )
 target_include_directories(sc_track_tests PRIVATE
@@ -20,6 +24,20 @@ endif()
 
 enable_testing()
 
-foreach(test_case IN ITEMS straight_and_junction fine_turns large_turns contiguous_pair_turns lost_recovery ambiguous_patterns arguments)
+foreach(test_case IN ITEMS
+    ratio_table
+    cruise_scaling_and_clamp
+    center_and_junction_clear_direction
+    unconditional_all_white_stop
+    left_and_right_search
+    single_black_sample_does_not_reset_recovery
+    three_fresh_samples_and_minimum_time_confirm
+    duplicate_sequence_does_not_confirm
+    alternating_white_black_uses_total_deadline
+    recovery_candidate_rejects_gap_and_duplicate
+    recovery_timeout_and_invalid_lines
+    ambiguous_patterns_and_arguments
+    start_eligibility
+)
     add_test(NAME "${test_case}" COMMAND sc_track_tests "${test_case}")
 endforeach()

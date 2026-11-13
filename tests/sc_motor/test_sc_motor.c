@@ -260,6 +260,36 @@ static int test_tb_scaling_same_direction(void)
   return 0;
 }
 
+static int test_tb_zero_same_direction_fast_path(void)
+{
+  sc_tb6612_state_t state;
+
+  fake_hal_reset();
+  if (prepare_ready_tb(&state) != 0)
+  {
+    return 1;
+  }
+
+  CHECK(sc_tb6612_apply(0, 300) == SC_TB6612_OK);
+  fake_clear_events();
+  CHECK(sc_tb6612_apply(0, 600) == SC_TB6612_OK);
+
+  CHECK(htim4.fake_ccr1 == 3600u);
+  CHECK(htim4.fake_ccr2 == 2160u);
+  CHECK(fake_find_event(FAKE_EVENT_GPIO_WRITE, 0u) < 0);
+  CHECK(fake_find_event(FAKE_EVENT_TIM_UPDATE, 0u) < 0);
+  CHECK(fake_find_event(FAKE_EVENT_SET_COMPARE, 0u) >= 0);
+  CHECK(fake_gpio_level(TB6612_STBY_GPIO_Port, TB6612_STBY_Pin) ==
+        GPIO_PIN_SET);
+  CHECK(sc_tb6612_get_state(&state) == SC_TB6612_OK);
+  CHECK(state.left_command == 0);
+  CHECK(state.right_command == 600);
+  CHECK(state.left_ccr == 3600u);
+  CHECK(state.right_ccr == 2160u);
+  CHECK(state.safe_stop_count == 0u);
+  return 0;
+}
+
 static int test_tb_zero_high_impedance(void)
 {
   sc_tb6612_state_t state;
@@ -821,6 +851,8 @@ static const test_case_t s_tests[] = {
   {"tb_config_reject", test_tb_config_reject},
   {"tb_apply_uninitialized_no_tim", test_tb_apply_uninitialized_no_tim},
   {"tb_scaling_same_direction", test_tb_scaling_same_direction},
+  {"tb_zero_same_direction_fast_path",
+   test_tb_zero_same_direction_fast_path},
   {"tb_zero_high_impedance", test_tb_zero_high_impedance},
   {"tb_out_of_range_safe_fault", test_tb_out_of_range_safe_fault},
   {"tb_set_standby_clear_sequence", test_tb_set_standby_clear_sequence},

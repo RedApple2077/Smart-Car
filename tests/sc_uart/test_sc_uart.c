@@ -15,26 +15,26 @@
     }                                                                         \
   } while (0)
 
-static int init_required_ports(void)
-{
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
-  CHECK(sc_uart_init(SC_UART_USART2, 9600u) == SC_UART_OK);
-  return 0;
-}
-
 static int test_init_and_idempotency(void)
 {
   fake_hal_reset();
 
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
-  CHECK(fake_receive_call_count(&huart1) == 1u);
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
-  CHECK(fake_receive_call_count(&huart1) == 1u);
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_OK);
+  CHECK(fake_receive_call_count(&huart2) == 0u);
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_OK);
+  CHECK(fake_receive_call_count(&huart2) == 0u);
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_ERR_CONFIG);
+  return 0;
+}
 
-  CHECK(sc_uart_init(SC_UART_USART2, 9600u) == SC_UART_OK);
+static int test_rx_enabled_init_idempotency(void)
+{
+  fake_hal_reset();
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_OK);
   CHECK(fake_receive_call_count(&huart2) == 1u);
-  CHECK(sc_uart_init(SC_UART_USART2, 9600u) == SC_UART_OK);
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_OK);
   CHECK(fake_receive_call_count(&huart2) == 1u);
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_ERR_CONFIG);
   return 0;
 }
 
@@ -50,61 +50,63 @@ static int test_init_config_errors(void)
 
   fake_hal_reset();
 
-  CHECK(sc_uart_init((sc_uart_port_t)0, 115200u) ==
-        SC_UART_ERR_ARGUMENT);
-  CHECK(sc_uart_init((sc_uart_port_t)3, 115200u) ==
-        SC_UART_ERR_ARGUMENT);
-  CHECK(sc_uart_init(SC_UART_USART1, 0u) == SC_UART_ERR_ARGUMENT);
-  CHECK(sc_uart_init(SC_UART_USART1, 9600u) == SC_UART_ERR_CONFIG);
+  CHECK(sc_uart_init(0u, 0u) == SC_UART_ERR_ARGUMENT);
+  CHECK(sc_uart_init(9600u, 2u) == SC_UART_ERR_ARGUMENT);
+  CHECK(sc_uart_init(19200u, 0u) == SC_UART_ERR_CONFIG);
 
-  word_length = huart1.Init.WordLength;
-  huart1.Init.WordLength = UART_WORDLENGTH_9B;
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_ERR_CONFIG);
-  huart1.Init.WordLength = word_length;
+  word_length = huart2.Init.WordLength;
+  huart2.Init.WordLength = UART_WORDLENGTH_9B;
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_ERR_CONFIG);
+  huart2.Init.WordLength = word_length;
 
-  stop_bits = huart1.Init.StopBits;
-  huart1.Init.StopBits = UART_STOPBITS_2;
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_ERR_CONFIG);
-  huart1.Init.StopBits = stop_bits;
+  stop_bits = huart2.Init.StopBits;
+  huart2.Init.StopBits = UART_STOPBITS_2;
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_ERR_CONFIG);
+  huart2.Init.StopBits = stop_bits;
 
-  parity = huart1.Init.Parity;
-  huart1.Init.Parity = UART_PARITY_EVEN;
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_ERR_CONFIG);
-  huart1.Init.Parity = parity;
+  parity = huart2.Init.Parity;
+  huart2.Init.Parity = UART_PARITY_EVEN;
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_ERR_CONFIG);
+  huart2.Init.Parity = parity;
 
-  mode = huart1.Init.Mode;
-  huart1.Init.Mode = UART_MODE_RX;
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_ERR_CONFIG);
-  huart1.Init.Mode = mode;
+  mode = huart2.Init.Mode;
+  huart2.Init.Mode = UART_MODE_RX;
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_ERR_CONFIG);
+  huart2.Init.Mode = mode;
 
-  flow = huart1.Init.HwFlowCtl;
-  huart1.Init.HwFlowCtl = 1u;
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_ERR_CONFIG);
-  huart1.Init.HwFlowCtl = flow;
+  flow = huart2.Init.HwFlowCtl;
+  huart2.Init.HwFlowCtl = 1u;
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_ERR_CONFIG);
+  huart2.Init.HwFlowCtl = flow;
 
-  instance = huart1.Instance;
-  huart1.Instance = USART2;
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_ERR_CONFIG);
-  huart1.Instance = instance;
+  instance = huart2.Instance;
+  huart2.Instance = NULL;
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_ERR_CONFIG);
+  huart2.Instance = instance;
 
-  state = huart1.gState;
-  huart1.gState = HAL_UART_STATE_BUSY_TX;
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_ERR_BUSY);
-  huart1.gState = state;
+  state = huart2.gState;
+  huart2.gState = HAL_UART_STATE_BUSY_TX;
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_ERR_BUSY);
+  huart2.gState = state;
 
-  state = huart1.RxState;
-  huart1.RxState = HAL_UART_STATE_ERROR;
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) ==
-        SC_UART_ERR_NOT_READY);
-  huart1.RxState = state;
+  state = huart2.RxState;
+  huart2.RxState = HAL_UART_STATE_ERROR;
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_ERR_NOT_READY);
+  huart2.RxState = HAL_UART_STATE_READY;
 
   fake_fail_next_receive(HAL_ERROR);
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_ERR_HAL);
-  CHECK(huart1.RxState == HAL_UART_STATE_READY);
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_ERR_HAL);
+  CHECK(huart2.RxState == HAL_UART_STATE_READY);
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_OK);
+  return 0;
+}
 
-  CHECK(sc_uart_init(SC_UART_USART2, 9600u) == SC_UART_OK);
-  CHECK(sc_uart_init(SC_UART_USART2, 115200u) == SC_UART_ERR_CONFIG);
+static int test_rx_disabled_ignores_rx_state(void)
+{
+  fake_hal_reset();
+  huart2.RxState = HAL_UART_STATE_ERROR;
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_OK);
+  CHECK(fake_receive_call_count(&huart2) == 0u);
   return 0;
 }
 
@@ -119,45 +121,38 @@ static int test_tx_boundary(void)
   sc_uart_stats_t stats;
 
   fake_hal_reset();
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_OK);
 
   for (index = 0u; index < sizeof(payload); index++)
   {
     payload[index] = (uint8_t)index;
   }
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, payload, sizeof(payload)) ==
-        SC_UART_OK);
-  CHECK(fake_transmit_call_count(&huart1) == 1u);
-  CHECK(huart1.TxXferSize == 512u);
+  CHECK(sc_uart_write_bytes(payload, sizeof(payload)) == SC_UART_OK);
+  CHECK(fake_transmit_call_count(&huart2) == 1u);
+  CHECK(huart2.TxXferSize == 512u);
 
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, &extra, 1u) ==
-        SC_UART_ERR_BUFFER_FULL);
-  CHECK(sc_uart_get_stats(SC_UART_USART1, &stats) == SC_UART_OK);
+  CHECK(sc_uart_write_bytes(&extra, 1u) == SC_UART_ERR_BUFFER_FULL);
+  CHECK(sc_uart_get_stats(&stats) == SC_UART_OK);
   CHECK(stats.tx_rejected_writes == 1u);
 
-  fake_complete_transmit(&huart1);
-  CHECK(fake_copy_transmitted(&huart1, history, sizeof(history)) ==
+  fake_complete_transmit(&huart2);
+  CHECK(fake_copy_transmitted(&huart2, history, sizeof(history)) ==
         sizeof(payload));
   CHECK(memcmp(history, payload, sizeof(payload)) == 0);
 
   memset(text, 'x', sizeof(text));
   text[512] = '\0';
-  CHECK(sc_uart_write(SC_UART_USART1, text) == SC_UART_OK);
-  fake_complete_transmit(&huart1);
+  CHECK(sc_uart_write(text) == SC_UART_OK);
+  fake_complete_transmit(&huart2);
 
   memset(text, 'y', sizeof(text));
   text[513] = '\0';
-  CHECK(sc_uart_write(SC_UART_USART1, text) ==
-        SC_UART_ERR_BUFFER_FULL);
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, NULL, 0u) == SC_UART_OK);
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, NULL, 1u) ==
-        SC_UART_ERR_ARGUMENT);
-  CHECK(sc_uart_read(SC_UART_USART1, NULL, 0u, &received) == SC_UART_OK);
-  CHECK(received == 0u);
-  CHECK(sc_uart_read(SC_UART_USART1, NULL, 1u, &received) ==
-        SC_UART_ERR_ARGUMENT);
-  CHECK(sc_uart_read(SC_UART_USART1, &extra, 1u, NULL) ==
-        SC_UART_ERR_ARGUMENT);
+  CHECK(sc_uart_write(text) == SC_UART_ERR_BUFFER_FULL);
+  CHECK(sc_uart_write_bytes(NULL, 0u) == SC_UART_OK);
+  CHECK(sc_uart_write_bytes(NULL, 1u) == SC_UART_ERR_ARGUMENT);
+  CHECK(sc_uart_read(NULL, 0u, &received) == SC_UART_ERR_NOT_READY);
+  CHECK(sc_uart_read(NULL, 1u, &received) == SC_UART_ERR_ARGUMENT);
+  CHECK(sc_uart_read(&extra, 1u, NULL) == SC_UART_ERR_ARGUMENT);
   return 0;
 }
 
@@ -170,33 +165,31 @@ static int test_tx_wrap(void)
   size_t index;
 
   fake_hal_reset();
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_OK);
 
   for (index = 0u; index < sizeof(first); index++)
   {
     first[index] = (uint8_t)(index + 1u);
   }
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, first, sizeof(first)) ==
-        SC_UART_OK);
-  fake_complete_transmit(&huart1);
+  CHECK(sc_uart_write_bytes(first, sizeof(first)) == SC_UART_OK);
+  fake_complete_transmit(&huart2);
 
   for (index = 0u; index < sizeof(second); index++)
   {
     second[index] = (uint8_t)(0x80u + index);
     expected[index] = second[index];
   }
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, second, sizeof(second)) ==
-        SC_UART_OK);
-  CHECK(huart1.TxXferSize == 112u);
-  fake_complete_transmit(&huart1);
-  CHECK(huart1.gState == HAL_UART_STATE_BUSY_TX);
-  CHECK(huart1.TxXferSize == 188u);
-  fake_complete_transmit(&huart1);
+  CHECK(sc_uart_write_bytes(second, sizeof(second)) == SC_UART_OK);
+  CHECK(huart2.TxXferSize == 112u);
+  fake_complete_transmit(&huart2);
+  CHECK(huart2.gState == HAL_UART_STATE_BUSY_TX);
+  CHECK(huart2.TxXferSize == 188u);
+  fake_complete_transmit(&huart2);
 
-  CHECK(fake_copy_transmitted(&huart1, history, sizeof(history)) ==
+  CHECK(fake_copy_transmitted(&huart2, history, sizeof(history)) ==
         sizeof(history));
   CHECK(memcmp(history, expected, sizeof(expected)) == 0);
-  CHECK(huart1.gState == HAL_UART_STATE_READY);
+  CHECK(huart2.gState == HAL_UART_STATE_READY);
   return 0;
 }
 
@@ -210,48 +203,46 @@ static int test_tx_start_retry(void)
   sc_uart_stats_t stats;
 
   fake_hal_reset();
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_OK);
 
   fake_fail_next_transmit(HAL_BUSY);
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, rejected, sizeof(rejected)) ==
+  CHECK(sc_uart_write_bytes(rejected, sizeof(rejected)) ==
         SC_UART_ERR_BUSY);
-  CHECK(sc_uart_get_stats(SC_UART_USART1, &stats) == SC_UART_OK);
+  CHECK(sc_uart_get_stats(&stats) == SC_UART_OK);
   CHECK(stats.tx_start_failures == 1u);
   CHECK(stats.tx_rejected_writes == 1u);
-  CHECK(fake_transmit_call_count(&huart1) == 1u);
+  CHECK(fake_transmit_call_count(&huart2) == 1u);
 
-  calls_before_service = fake_transmit_call_count(&huart1);
+  calls_before_service = fake_transmit_call_count(&huart2);
   sc_uart_service();
-  CHECK(fake_transmit_call_count(&huart1) == calls_before_service);
+  CHECK(fake_transmit_call_count(&huart2) == calls_before_service);
   fake_set_tick(1u);
   sc_uart_service();
-  CHECK(fake_transmit_call_count(&huart1) == calls_before_service);
+  CHECK(fake_transmit_call_count(&huart2) == calls_before_service);
 
   memset(first, 0x31, sizeof(first));
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, first, sizeof(first)) ==
-        SC_UART_OK);
-  fake_complete_transmit(&huart1);
+  CHECK(sc_uart_write_bytes(first, sizeof(first)) == SC_UART_OK);
+  fake_complete_transmit(&huart2);
 
   memset(second, 0x62, sizeof(second));
-  CHECK(sc_uart_write_bytes(SC_UART_USART1, second, sizeof(second)) ==
-        SC_UART_OK);
+  CHECK(sc_uart_write_bytes(second, sizeof(second)) == SC_UART_OK);
   fake_fail_next_transmit(HAL_ERROR);
-  calls_before_service = fake_transmit_call_count(&huart1);
-  fake_complete_transmit(&huart1);
-  CHECK(fake_transmit_call_count(&huart1) == calls_before_service + 1u);
+  calls_before_service = fake_transmit_call_count(&huart2);
+  fake_complete_transmit(&huart2);
+  CHECK(fake_transmit_call_count(&huart2) == calls_before_service + 1u);
   sc_uart_service();
-  CHECK(fake_transmit_call_count(&huart1) == calls_before_service + 1u);
+  CHECK(fake_transmit_call_count(&huart2) == calls_before_service + 1u);
 
   fake_set_tick(2u);
   sc_uart_service();
-  CHECK(fake_transmit_call_count(&huart1) == calls_before_service + 2u);
-  CHECK(huart1.TxXferSize == 88u);
-  fake_complete_transmit(&huart1);
+  CHECK(fake_transmit_call_count(&huart2) == calls_before_service + 2u);
+  CHECK(huart2.TxXferSize == 88u);
+  fake_complete_transmit(&huart2);
 
-  CHECK(fake_copy_transmitted(&huart1, history, sizeof(history)) ==
+  CHECK(fake_copy_transmitted(&huart2, history, sizeof(history)) ==
         sizeof(history));
   CHECK(memcmp(history, second, sizeof(second)) == 0);
-  CHECK(sc_uart_get_stats(SC_UART_USART1, &stats) == SC_UART_OK);
+  CHECK(sc_uart_get_stats(&stats) == SC_UART_OK);
   CHECK(stats.tx_start_failures == 2u);
   CHECK(stats.tx_rejected_writes == 1u);
   return 0;
@@ -259,33 +250,31 @@ static int test_tx_start_retry(void)
 
 static int test_rx_overflow(void)
 {
-  uint8_t expected[128];
-  uint8_t actual[128];
+  uint8_t expected[64];
+  uint8_t actual[64];
   uint8_t follow_up = 0x55u;
   size_t received;
   size_t index;
   sc_uart_stats_t stats;
 
   fake_hal_reset();
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_OK);
 
   for (index = 0u; index < sizeof(expected); index++)
   {
     expected[index] = (uint8_t)(index ^ 0x5Au);
-    fake_deliver_receive(&huart1, expected[index]);
+    fake_deliver_receive(&huart2, expected[index]);
   }
-  fake_deliver_receive(&huart1, 0xAAu);
+  fake_deliver_receive(&huart2, 0xAAu);
 
-  CHECK(sc_uart_get_stats(SC_UART_USART1, &stats) == SC_UART_OK);
+  CHECK(sc_uart_get_stats(&stats) == SC_UART_OK);
   CHECK(stats.rx_overflow_bytes == 1u);
-  CHECK(sc_uart_read(SC_UART_USART1, actual, sizeof(actual), &received) ==
-        SC_UART_OK);
+  CHECK(sc_uart_read(actual, sizeof(actual), &received) == SC_UART_OK);
   CHECK(received == sizeof(expected));
   CHECK(memcmp(actual, expected, sizeof(expected)) == 0);
 
-  fake_deliver_receive(&huart1, follow_up);
-  CHECK(sc_uart_read(SC_UART_USART1, actual, sizeof(actual), &received) ==
-        SC_UART_OK);
+  fake_deliver_receive(&huart2, follow_up);
+  CHECK(sc_uart_read(actual, sizeof(actual), &received) == SC_UART_OK);
   CHECK(received == 1u);
   CHECK(actual[0] == follow_up);
   return 0;
@@ -293,36 +282,34 @@ static int test_rx_overflow(void)
 
 static int test_rx_wrap(void)
 {
-  uint8_t input[100];
-  uint8_t segment[80];
-  uint8_t expected[120];
-  uint8_t actual[120];
+  uint8_t input[48];
+  uint8_t segment[32];
+  uint8_t expected[64];
+  uint8_t actual[64];
   size_t received;
   size_t index;
 
   fake_hal_reset();
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_OK);
 
   for (index = 0u; index < sizeof(input); index++)
   {
     input[index] = (uint8_t)(index + 0x10u);
-    fake_deliver_receive(&huart1, input[index]);
+    fake_deliver_receive(&huart2, input[index]);
   }
-  CHECK(sc_uart_read(SC_UART_USART1, segment, sizeof(segment), &received) ==
-        SC_UART_OK);
+  CHECK(sc_uart_read(segment, sizeof(segment), &received) == SC_UART_OK);
   CHECK(received == sizeof(segment));
   CHECK(memcmp(segment, input, sizeof(segment)) == 0);
 
-  memcpy(expected, &input[80], 20u);
-  for (index = 0u; index < 100u; index++)
+  memcpy(expected, &input[32], 16u);
+  for (index = 0u; index < 48u; index++)
   {
     uint8_t byte = (uint8_t)(0x90u + index);
-    expected[20u + index] = byte;
-    fake_deliver_receive(&huart1, byte);
+    expected[16u + index] = byte;
+    fake_deliver_receive(&huart2, byte);
   }
 
-  CHECK(sc_uart_read(SC_UART_USART1, actual, sizeof(actual), &received) ==
-        SC_UART_OK);
+  CHECK(sc_uart_read(actual, sizeof(actual), &received) == SC_UART_OK);
   CHECK(received == sizeof(expected));
   CHECK(memcmp(actual, expected, sizeof(expected)) == 0);
   return 0;
@@ -336,35 +323,35 @@ static int test_rx_error_ordering(void)
   sc_uart_stats_t stats;
 
   fake_hal_reset();
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
-  calls = fake_receive_call_count(&huart1);
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_OK);
+  calls = fake_receive_call_count(&huart2);
 
-  fake_deliver_receive_error_with_complete(&huart1, 0xEEu,
+  fake_deliver_receive_error_with_complete(&huart2, 0xEEu,
                                            HAL_UART_ERROR_ORE);
-  CHECK(fake_receive_call_count(&huart1) == calls + 1u);
-  CHECK(sc_uart_read(SC_UART_USART1, &byte, 1u, &received) == SC_UART_OK);
+  CHECK(fake_receive_call_count(&huart2) == calls + 1u);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_OK);
   CHECK(received == 0u);
-  CHECK(sc_uart_get_stats(SC_UART_USART1, &stats) == SC_UART_OK);
+  CHECK(sc_uart_get_stats(&stats) == SC_UART_OK);
   CHECK(stats.rx_ore_events == 1u);
   CHECK(stats.rx_error_bytes == 1u);
 
-  fake_deliver_receive(&huart1, 0x41u);
-  CHECK(sc_uart_read(SC_UART_USART1, &byte, 1u, &received) == SC_UART_OK);
+  fake_deliver_receive(&huart2, 0x41u);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_OK);
   CHECK((received == 1u) && (byte == 0x41u));
 
-  calls = fake_receive_call_count(&huart1);
+  calls = fake_receive_call_count(&huart2);
   fake_deliver_receive_error_with_complete(
-    &huart1, 0xEFu, HAL_UART_ERROR_FE | HAL_UART_ERROR_NE);
-  CHECK(fake_receive_call_count(&huart1) == calls + 1u);
-  CHECK(sc_uart_read(SC_UART_USART1, &byte, 1u, &received) == SC_UART_OK);
+    &huart2, 0xEFu, HAL_UART_ERROR_FE | HAL_UART_ERROR_NE);
+  CHECK(fake_receive_call_count(&huart2) == calls + 1u);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_OK);
   CHECK(received == 0u);
-  CHECK(sc_uart_get_stats(SC_UART_USART1, &stats) == SC_UART_OK);
+  CHECK(sc_uart_get_stats(&stats) == SC_UART_OK);
   CHECK(stats.rx_fe_events == 1u);
   CHECK(stats.rx_ne_events == 1u);
   CHECK(stats.rx_error_bytes == 2u);
 
-  fake_deliver_receive(&huart1, 0x42u);
-  CHECK(sc_uart_read(SC_UART_USART1, &byte, 1u, &received) == SC_UART_OK);
+  fake_deliver_receive(&huart2, 0x42u);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_OK);
   CHECK((received == 1u) && (byte == 0x42u));
   return 0;
 }
@@ -377,76 +364,78 @@ static int test_rx_error_recovery(void)
   sc_uart_stats_t stats;
 
   fake_hal_reset();
-  CHECK(sc_uart_init(SC_UART_USART1, 115200u) == SC_UART_OK);
-  calls = fake_receive_call_count(&huart1);
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_OK);
+  calls = fake_receive_call_count(&huart2);
 
-  fake_deliver_error_without_rxne(&huart1, HAL_UART_ERROR_FE);
-  CHECK(fake_receive_call_count(&huart1) == calls);
+  fake_deliver_error_without_rxne(&huart2, HAL_UART_ERROR_FE);
+  CHECK(fake_receive_call_count(&huart2) == calls);
 
-  fake_deliver_receive(&huart1, 0x42u);
-  CHECK(sc_uart_read(SC_UART_USART1, &byte, 1u, &received) == SC_UART_OK);
+  fake_deliver_receive(&huart2, 0x42u);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_OK);
   CHECK((received == 1u) && (byte == 0x42u));
 
   fake_fail_next_receive(HAL_BUSY);
-  fake_deliver_receive(&huart1, 0x43u);
-  CHECK(sc_uart_read(SC_UART_USART1, &byte, 1u, &received) == SC_UART_OK);
+  fake_deliver_receive(&huart2, 0x43u);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_OK);
   CHECK((received == 1u) && (byte == 0x43u));
-  CHECK(sc_uart_get_stats(SC_UART_USART1, &stats) == SC_UART_OK);
+  CHECK(sc_uart_get_stats(&stats) == SC_UART_OK);
   CHECK(stats.rx_rearm_failures == 1u);
 
-  calls = fake_receive_call_count(&huart1);
+  calls = fake_receive_call_count(&huart2);
   sc_uart_service();
-  CHECK(fake_receive_call_count(&huart1) == calls);
+  CHECK(fake_receive_call_count(&huart2) == calls);
   fake_set_tick(1u);
   sc_uart_service();
-  CHECK(fake_receive_call_count(&huart1) == calls + 1u);
+  CHECK(fake_receive_call_count(&huart2) == calls + 1u);
 
-  fake_deliver_receive(&huart1, 0x44u);
-  CHECK(sc_uart_read(SC_UART_USART1, &byte, 1u, &received) == SC_UART_OK);
+  fake_deliver_receive(&huart2, 0x44u);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_OK);
   CHECK((received == 1u) && (byte == 0x44u));
   return 0;
 }
 
-static int test_dual_port_isolation(void)
+static int test_rx_disabled(void)
 {
-  uint8_t byte1 = 0x11u;
-  uint8_t byte2 = 0x22u;
-  uint8_t byte;
-  uint8_t history[1];
+  uint8_t byte = 0u;
+  uint8_t payload[2] = {0x11u, 0x22u};
+  uint8_t history[2];
   size_t received;
-  sc_uart_stats_t stats1;
-  sc_uart_stats_t stats2;
+  uint32_t calls;
 
   fake_hal_reset();
-  CHECK(init_required_ports() == 0);
+  CHECK(sc_uart_init(9600u, 0u) == SC_UART_OK);
+  CHECK(fake_receive_call_count(&huart2) == 0u);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_ERR_NOT_READY);
 
-  fake_deliver_receive(&huart1, byte1);
-  fake_deliver_receive(&huart2, byte2);
-  CHECK(sc_uart_read(SC_UART_USART1, &byte, 1u, &received) == SC_UART_OK);
-  CHECK((received == 1u) && (byte == byte1));
-  CHECK(sc_uart_read(SC_UART_USART2, &byte, 1u, &received) == SC_UART_OK);
-  CHECK((received == 1u) && (byte == byte2));
+  calls = fake_receive_call_count(&huart2);
+  sc_uart_service();
+  fake_set_tick(1u);
+  sc_uart_service();
+  CHECK(fake_receive_call_count(&huart2) == calls);
 
-  CHECK(sc_uart_write(SC_UART_USART1, "A") == SC_UART_OK);
-  CHECK(sc_uart_write(SC_UART_USART2, "B") == SC_UART_OK);
-  fake_complete_transmit(&huart1);
-  CHECK(fake_copy_transmitted(&huart1, history, sizeof(history)) == 1u);
-  CHECK(history[0] == (uint8_t)'A');
-  CHECK(huart2.gState == HAL_UART_STATE_BUSY_TX);
+  CHECK(sc_uart_write_bytes(payload, sizeof(payload)) == SC_UART_OK);
   fake_complete_transmit(&huart2);
-  CHECK(fake_copy_transmitted(&huart2, history, sizeof(history)) == 1u);
-  CHECK(history[0] == (uint8_t)'B');
+  CHECK(fake_copy_transmitted(&huart2, history, sizeof(history)) ==
+        sizeof(history));
+  CHECK(memcmp(history, payload, sizeof(payload)) == 0);
+  return 0;
+}
 
-  fake_deliver_receive_error_with_complete(&huart1, 0xEEu,
-                                           HAL_UART_ERROR_FE);
+static int test_rx_tx_independent(void)
+{
+  uint8_t byte;
+  uint8_t transmitted;
+  size_t received;
+
+  fake_hal_reset();
+  CHECK(sc_uart_init(9600u, 1u) == SC_UART_OK);
   fake_deliver_receive(&huart2, 0x33u);
-  CHECK(sc_uart_read(SC_UART_USART2, &byte, 1u, &received) == SC_UART_OK);
+  CHECK(sc_uart_write("B") == SC_UART_OK);
+  CHECK(sc_uart_read(&byte, 1u, &received) == SC_UART_OK);
   CHECK((received == 1u) && (byte == 0x33u));
-  CHECK(sc_uart_get_stats(SC_UART_USART1, &stats1) == SC_UART_OK);
-  CHECK(sc_uart_get_stats(SC_UART_USART2, &stats2) == SC_UART_OK);
-  CHECK(stats1.rx_fe_events == 1u);
-  CHECK(stats2.rx_fe_events == 0u);
-  CHECK(stats2.rx_overflow_bytes == 0u);
+  fake_complete_transmit(&huart2);
+  CHECK(fake_copy_transmitted(&huart2, &transmitted, 1u) == 1u);
+  CHECK(transmitted == (uint8_t)'B');
   return 0;
 }
 
@@ -457,7 +446,9 @@ typedef struct {
 
 static const test_case_t s_tests[] = {
   {"init_and_idempotency", test_init_and_idempotency},
+  {"rx_enabled_init_idempotency", test_rx_enabled_init_idempotency},
   {"init_config_errors", test_init_config_errors},
+  {"rx_disabled_ignores_rx_state", test_rx_disabled_ignores_rx_state},
   {"tx_boundary", test_tx_boundary},
   {"tx_wrap", test_tx_wrap},
   {"tx_start_retry", test_tx_start_retry},
@@ -465,7 +456,8 @@ static const test_case_t s_tests[] = {
   {"rx_wrap", test_rx_wrap},
   {"rx_error_ordering", test_rx_error_ordering},
   {"rx_error_recovery", test_rx_error_recovery},
-  {"dual_port_isolation", test_dual_port_isolation}
+  {"rx_disabled", test_rx_disabled},
+  {"rx_tx_independent", test_rx_tx_independent}
 };
 
 int main(int argc, char **argv)

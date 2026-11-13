@@ -9,8 +9,8 @@
 #include "sc_tb6612.h"
 #include "sc_uart.h"
 
-#define FAKE_BENCH_TX_CAPACITY 32u
-#define FAKE_BENCH_TX_LINE_SIZE 256u
+#define FAKE_BENCH_TX_CAPACITY 64u
+#define FAKE_BENCH_TX_LINE_SIZE 1024u
 
 void fake_bench_reset(void);
 void fake_bench_inject_rx(const char *data, size_t length);
@@ -21,6 +21,7 @@ const char *fake_bench_tx_at(size_t index);
 void fake_bench_fail_next_read(void);
 void fake_bench_fail_next_stats(void);
 void fake_bench_fail_next_write(void);
+void fake_bench_full_next_write(void);
 void fake_bench_fail_next_standby_enable(void);
 void fake_bench_fail_next_standby_disable(void);
 void fake_bench_fail_next_apply(void);
@@ -33,6 +34,9 @@ sc_uart_stats_t *fake_bench_uart_stats(void);
 sc_tb6612_state_t *fake_bench_tb_state(void);
 sc_encoder_snapshot_t *fake_bench_encoder_snapshot(void);
 sc_line_state_t *fake_bench_line_state(void);
+void fake_bench_advance_encoder(uint32_t sample_time_ms,
+                                int32_t left_delta,
+                                int32_t right_delta);
 
 uint32_t fake_bench_standby_calls(void);
 uint8_t fake_bench_last_standby_enable(void);

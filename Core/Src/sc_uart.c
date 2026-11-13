@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    sc_uart.c
-  * @brief   USART1/USART2 非阻塞环形缓冲驱动。
+  * @brief   HC-05/USART2 非阻塞环形缓冲驱动。
   ******************************************************************************
   */
 
@@ -12,12 +12,9 @@
 #include <stdbool.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define SC_UART_USART1_RX_CAPACITY  128u
-#define SC_UART_USART1_TX_CAPACITY  512u
-#define SC_UART_USART2_RX_CAPACITY  64u
-#define SC_UART_USART2_TX_CAPACITY  512u
-
-#define SC_UART_RETRY_INTERVAL_MS   1u
+#define SC_UART_RX_CAPACITY       64u
+#define SC_UART_TX_CAPACITY       512u
+#define SC_UART_RETRY_INTERVAL_MS 1u
 
 /* Private types -------------------------------------------------------------*/
 typedef struct {
@@ -33,6 +30,7 @@ typedef struct {
   sc_uart_ring_t tx;
   uint8_t rx_byte;
   volatile bool initialized;
+  volatile bool rx_enable;
   volatile bool rx_armed;
   volatile bool tx_active;
   volatile uint16_t tx_inflight;
@@ -43,26 +41,16 @@ typedef struct {
 } sc_uart_context_t;
 
 /* External variables --------------------------------------------------------*/
-extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 
 /* Private variables ---------------------------------------------------------*/
-static uint8_t s_usart1_rx_storage[SC_UART_USART1_RX_CAPACITY];
-static uint8_t s_usart1_tx_storage[SC_UART_USART1_TX_CAPACITY];
-static uint8_t s_usart2_rx_storage[SC_UART_USART2_RX_CAPACITY];
-static uint8_t s_usart2_tx_storage[SC_UART_USART2_TX_CAPACITY];
+static uint8_t s_rx_storage[SC_UART_RX_CAPACITY];
+static uint8_t s_tx_storage[SC_UART_TX_CAPACITY];
 
-static sc_uart_context_t s_contexts[3] = {
-  [SC_UART_USART1] = {
-    .hal = &huart1,
-    .rx = {s_usart1_rx_storage, SC_UART_USART1_RX_CAPACITY, 0u, 0u},
-    .tx = {s_usart1_tx_storage, SC_UART_USART1_TX_CAPACITY, 0u, 0u}
-  },
-  [SC_UART_USART2] = {
-    .hal = &huart2,
-    .rx = {s_usart2_rx_storage, SC_UART_USART2_RX_CAPACITY, 0u, 0u},
-    .tx = {s_usart2_tx_storage, SC_UART_USART2_TX_CAPACITY, 0u, 0u}
-  }
+static sc_uart_context_t s_context = {
+  .hal = &huart2,
+  .rx = {s_rx_storage, SC_UART_RX_CAPACITY, 0u, 0u},
+  .tx = {s_tx_storage, SC_UART_TX_CAPACITY, 0u, 0u}
 };
 
 /* Private functions ---------------------------------------------------------*/
@@ -85,33 +73,13 @@ static void sc_uart_exit_critical(uint32_t primask)
   }
 }
 
-static sc_uart_context_t *sc_uart_context_for_port(sc_uart_port_t port)
-{
-  if ((port != SC_UART_USART1) && (port != SC_UART_USART2))
-  {
-    return NULL;
-  }
-
-  return &s_contexts[(uint32_t)port];
-}
-
 static sc_uart_context_t *sc_uart_context_for_handle(
   const UART_HandleTypeDef *huart)
 {
-  if (huart == NULL)
+  if ((huart != NULL) && (huart->Instance == USART2))
   {
-    return NULL;
+    return &s_context;
   }
-
-  if (huart->Instance == USART1)
-  {
-    return &s_contexts[SC_UART_USART1];
-  }
-  if (huart->Instance == USART2)
-  {
-    return &s_contexts[SC_UART_USART2];
-  }
-
   return NULL;
 }
 
@@ -211,6 +179,11 @@ static sc_uart_status_t sc_uart_arm_rx(sc_uart_context_t *ctx)
   uint32_t primask;
   uint32_t retry_tick;
 
+  if (!ctx->rx_enable)
+  {
+    return SC_UART_ERR_NOT_READY;
+  }
+
   primask = sc_uart_enter_critical();
   if (ctx->rx_armed)
   {
@@ -302,10 +275,9 @@ static void sc_uart_clear_rx_error_flags(UART_HandleTypeDef *huart)
 }
 
 static bool sc_uart_config_matches(const UART_HandleTypeDef *huart,
-                                   const USART_TypeDef *instance,
                                    uint32_t baud)
 {
-  return (huart->Instance == instance) &&
+  return (huart->Instance == USART2) &&
          (huart->Init.BaudRate == baud) &&
          (huart->Init.WordLength == UART_WORDLENGTH_8B) &&
          (huart->Init.StopBits == UART_STOPBITS_1) &&
@@ -314,42 +286,47 @@ static bool sc_uart_config_matches(const UART_HandleTypeDef *huart,
          (huart->Init.HwFlowCtl == UART_HWCONTROL_NONE);
 }
 
-/* Exported functions --------------------------------------------------------*/
-sc_uart_status_t sc_uart_init(sc_uart_port_t port, uint32_t baud)
+static sc_uart_status_t sc_uart_hal_state_status(
+  HAL_UART_StateTypeDef state)
 {
-  sc_uart_context_t *ctx = sc_uart_context_for_port(port);
-  const USART_TypeDef *instance;
+  if ((state == HAL_UART_STATE_BUSY_TX) ||
+      (state == HAL_UART_STATE_BUSY_RX) ||
+      (state == HAL_UART_STATE_BUSY_TX_RX))
+  {
+    return SC_UART_ERR_BUSY;
+  }
+  return SC_UART_ERR_NOT_READY;
+}
+
+/* Exported functions --------------------------------------------------------*/
+sc_uart_status_t sc_uart_init(uint32_t baud, uint8_t rx_enable)
+{
+  sc_uart_context_t *ctx = &s_context;
   uint32_t primask;
 
-  if ((ctx == NULL) || (baud == 0u))
+  if ((baud == 0u) || (rx_enable > 1u))
   {
     return SC_UART_ERR_ARGUMENT;
   }
-
-  instance = (port == SC_UART_USART1) ? USART1 : USART2;
-  if (!sc_uart_config_matches(ctx->hal, instance, baud))
+  if (!sc_uart_config_matches(ctx->hal, baud))
   {
     return SC_UART_ERR_CONFIG;
   }
 
   if (ctx->initialized)
   {
-    return (ctx->baud == baud) ? SC_UART_OK : SC_UART_ERR_CONFIG;
+    return ((ctx->baud == baud) &&
+            (ctx->rx_enable == (rx_enable != 0u))) ?
+             SC_UART_OK : SC_UART_ERR_CONFIG;
   }
 
   if (ctx->hal->gState != HAL_UART_STATE_READY)
   {
-    return ((ctx->hal->gState == HAL_UART_STATE_BUSY_TX) ||
-            (ctx->hal->gState == HAL_UART_STATE_BUSY_TX_RX))
-             ? SC_UART_ERR_BUSY
-             : SC_UART_ERR_NOT_READY;
+    return sc_uart_hal_state_status(ctx->hal->gState);
   }
-  if (ctx->hal->RxState != HAL_UART_STATE_READY)
+  if ((rx_enable != 0u) && (ctx->hal->RxState != HAL_UART_STATE_READY))
   {
-    return ((ctx->hal->RxState == HAL_UART_STATE_BUSY_RX) ||
-            (ctx->hal->RxState == HAL_UART_STATE_BUSY_TX_RX))
-             ? SC_UART_ERR_BUSY
-             : SC_UART_ERR_NOT_READY;
+    return sc_uart_hal_state_status(ctx->hal->RxState);
   }
 
   ctx->hal->ErrorCode = HAL_UART_ERROR_NONE;
@@ -361,6 +338,7 @@ sc_uart_status_t sc_uart_init(sc_uart_port_t port, uint32_t baud)
   ctx->tx.head = 0u;
   ctx->tx.tail = 0u;
   ctx->stats = (sc_uart_stats_t){0};
+  ctx->rx_enable = (rx_enable != 0u);
   ctx->rx_armed = false;
   ctx->tx_active = false;
   ctx->tx_inflight = 0u;
@@ -370,6 +348,7 @@ sc_uart_status_t sc_uart_init(sc_uart_port_t port, uint32_t baud)
   ctx->initialized = true;
   sc_uart_exit_critical(primask);
 
+  if (ctx->rx_enable)
   {
     sc_uart_status_t status = sc_uart_arm_rx(ctx);
     if (status != SC_UART_OK)
@@ -382,13 +361,13 @@ sc_uart_status_t sc_uart_init(sc_uart_port_t port, uint32_t baud)
   return SC_UART_OK;
 }
 
-sc_uart_status_t sc_uart_write(sc_uart_port_t port, const char *text)
+sc_uart_status_t sc_uart_write(const char *text)
 {
-  sc_uart_context_t *ctx = sc_uart_context_for_port(port);
+  sc_uart_context_t *ctx = &s_context;
   size_t len;
   uint32_t primask;
 
-  if ((ctx == NULL) || (text == NULL))
+  if (text == NULL)
   {
     return SC_UART_ERR_ARGUMENT;
   }
@@ -413,18 +392,17 @@ sc_uart_status_t sc_uart_write(sc_uart_port_t port, const char *text)
     return SC_UART_ERR_BUFFER_FULL;
   }
 
-  return sc_uart_write_bytes(port, (const uint8_t *)text, len);
+  return sc_uart_write_bytes((const uint8_t *)text, len);
 }
 
-sc_uart_status_t sc_uart_write_bytes(sc_uart_port_t port,
-                                     const uint8_t *data, size_t len)
+sc_uart_status_t sc_uart_write_bytes(const uint8_t *data, size_t len)
 {
-  sc_uart_context_t *ctx = sc_uart_context_for_port(port);
+  sc_uart_context_t *ctx = &s_context;
   sc_uart_status_t status;
   uint32_t old_head;
   uint32_t primask;
 
-  if ((ctx == NULL) || ((data == NULL) && (len != 0u)))
+  if ((data == NULL) && (len != 0u))
   {
     return SC_UART_ERR_ARGUMENT;
   }
@@ -464,17 +442,16 @@ sc_uart_status_t sc_uart_write_bytes(sc_uart_port_t port,
   return status;
 }
 
-sc_uart_status_t sc_uart_read(sc_uart_port_t port, uint8_t *dst,
-                              size_t capacity, size_t *received)
+sc_uart_status_t sc_uart_read(uint8_t *dst, size_t capacity,
+                              size_t *received)
 {
-  sc_uart_context_t *ctx = sc_uart_context_for_port(port);
+  sc_uart_context_t *ctx = &s_context;
 
-  if ((ctx == NULL) || (received == NULL) ||
-      ((dst == NULL) && (capacity != 0u)))
+  if ((received == NULL) || ((dst == NULL) && (capacity != 0u)))
   {
     return SC_UART_ERR_ARGUMENT;
   }
-  if (!ctx->initialized)
+  if (!ctx->initialized || !ctx->rx_enable)
   {
     return SC_UART_ERR_NOT_READY;
   }
@@ -483,13 +460,12 @@ sc_uart_status_t sc_uart_read(sc_uart_port_t port, uint8_t *dst,
   return SC_UART_OK;
 }
 
-sc_uart_status_t sc_uart_get_stats(sc_uart_port_t port,
-                                   sc_uart_stats_t *stats)
+sc_uart_status_t sc_uart_get_stats(sc_uart_stats_t *stats)
 {
-  sc_uart_context_t *ctx = sc_uart_context_for_port(port);
+  sc_uart_context_t *ctx = &s_context;
   uint32_t primask;
 
-  if ((ctx == NULL) || (stats == NULL))
+  if (stats == NULL)
   {
     return SC_UART_ERR_ARGUMENT;
   }
@@ -506,30 +482,25 @@ sc_uart_status_t sc_uart_get_stats(sc_uart_port_t port,
 
 void sc_uart_service(void)
 {
-  sc_uart_context_t *ctx;
+  sc_uart_context_t *ctx = &s_context;
   uint32_t now = HAL_GetTick();
-  uint32_t index;
 
-  for (index = SC_UART_USART1; index <= SC_UART_USART2; index++)
+  if (!ctx->initialized)
   {
-    ctx = &s_contexts[index];
-    if (!ctx->initialized)
-    {
-      continue;
-    }
+    return;
+  }
 
-    if (!ctx->rx_armed &&
-        (ctx->hal->RxState == HAL_UART_STATE_READY) &&
-        ((int32_t)(now - ctx->next_rx_retry_tick) >= 0))
-    {
-      (void)sc_uart_arm_rx(ctx);
-    }
+  if (ctx->rx_enable && !ctx->rx_armed &&
+      (ctx->hal->RxState == HAL_UART_STATE_READY) &&
+      ((int32_t)(now - ctx->next_rx_retry_tick) >= 0))
+  {
+    (void)sc_uart_arm_rx(ctx);
+  }
 
-    if (!ctx->tx_active && (sc_uart_ring_used(&ctx->tx) != 0u) &&
-        ((int32_t)(now - ctx->next_tx_retry_tick) >= 0))
-    {
-      (void)sc_uart_start_tx(ctx);
-    }
+  if (!ctx->tx_active && (sc_uart_ring_used(&ctx->tx) != 0u) &&
+      ((int32_t)(now - ctx->next_tx_retry_tick) >= 0))
+  {
+    (void)sc_uart_start_tx(ctx);
   }
 }
 
@@ -569,7 +540,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   sc_uart_context_t *ctx = sc_uart_context_for_handle(huart);
   uint32_t primask;
 
-  if ((ctx == NULL) || !ctx->initialized)
+  if ((ctx == NULL) || !ctx->initialized || !ctx->rx_enable)
   {
     return;
   }
@@ -602,7 +573,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 
   ctx = sc_uart_context_for_handle(huart);
   error = huart->ErrorCode;
-  if ((ctx == NULL) || !ctx->initialized)
+  if ((ctx == NULL) || !ctx->initialized || !ctx->rx_enable)
   {
     return;
   }
