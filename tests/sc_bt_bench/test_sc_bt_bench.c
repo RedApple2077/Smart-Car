@@ -178,10 +178,10 @@ static int test_status_fields(void)
   CHECK(strstr(response, "Rspeed=0") != NULL);
   CHECK(strstr(response, "Lkp=100") != NULL);
   CHECK(strstr(response, "Lki=750") != NULL);
-  CHECK(strstr(response, "Lff=803") != NULL);
+  CHECK(strstr(response, "Lff=798") != NULL);
   CHECK(strstr(response, "Rkp=100") != NULL);
   CHECK(strstr(response, "Rki=750") != NULL);
-  CHECK(strstr(response, "Rff=803") != NULL);
+  CHECK(strstr(response, "Rff=789") != NULL);
   CHECK(strstr(response, "CAP=0") != NULL);
   CHECK(strstr(response, "PARAM=UNVERIFIED") != NULL);
   CHECK(fake_bench_standby_calls() == 0u);
@@ -1409,7 +1409,7 @@ static int test_pid_ram_readback_and_state_gate(void)
   CHECK(strstr(response, "Lkp=100") != NULL);
   CHECK(strstr(response, "Lki=20") != NULL);
   CHECK(strstr(response, "Lkd=3") != NULL);
-  CHECK(strstr(response, "Lff=803") != NULL);
+  CHECK(strstr(response, "Lff=798") != NULL);
   CHECK(strstr(response, "Rkp=100") != NULL);
   CHECK(strstr(response, "PARAM=RAM_ONLY") != NULL);
 

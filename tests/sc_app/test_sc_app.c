@@ -87,12 +87,14 @@ static int test_defaults_match_bench_state(void)
   sc_app_get_default_config(&config);
   CHECK(config.calibration_valid == 0u);
   CHECK(config.tuning_valid == 1u);
-  CHECK(config.cruise_mm_s == 478);
-  CHECK(config.speed_controller.left.ff_milli == 803);
+  CHECK(config.cruise_mm_s == 500);
+  CHECK(config.wheel_calibration.left_wheel_diameter_um == 48600);
+  CHECK(config.wheel_calibration.right_wheel_diameter_um == 48600);
+  CHECK(config.speed_controller.left.ff_milli == 798);
   CHECK(config.speed_controller.left.kp_milli == 100);
   CHECK(config.speed_controller.left.ki_milli == 750);
   CHECK(config.speed_controller.left.kd_milli == 0);
-  CHECK(config.speed_controller.right.ff_milli == 803);
+  CHECK(config.speed_controller.right.ff_milli == 789);
   CHECK(config.speed_controller.right.kp_milli == 100);
   CHECK(config.speed_controller.right.ki_milli == 750);
   CHECK(config.speed_controller.right.kd_milli == 0);
@@ -237,6 +239,27 @@ static int test_full_white_and_invalid_config_block_start(void)
   CHECK(app.wheel.valid != 0u);
   CHECK(app.config.calibration_valid == 0u);
   CHECK(app.config.tuning_valid == 1u);
+  fake_button_queue(SC_BUTTON_EVENT_PRESSED);
+  CHECK(sc_app_service(&app, 70u) == SC_APP_OK);
+  fake_button_queue(SC_BUTTON_EVENT_RELEASED);
+  CHECK(sc_app_service(&app, 80u) == SC_APP_OK);
+  CHECK(app.phase == SC_APP_PHASE_IDLE);
+  CHECK(app.software_stby == 0u);
+  CHECK(app.stop_reason == SC_APP_STOP_START_REJECTED);
+  CHECK(fake_tb_state()->standby == 0u);
+
+  config.calibration_valid = 1u;
+  config.tuning_valid = 0u;
+  CHECK(init_app(&app, &config) == 0);
+  for (now_ms = 0u; now_ms <= 60u; now_ms += 10u)
+  {
+    CHECK(sc_app_service(&app, now_ms) == SC_APP_OK);
+  }
+  CHECK(app.phase == SC_APP_PHASE_IDLE);
+  CHECK(app.center_sample_count >= SC_APP_START_CENTER_SAMPLES);
+  CHECK(app.wheel.valid != 0u);
+  CHECK(app.config.calibration_valid == 1u);
+  CHECK(app.config.tuning_valid == 0u);
   fake_button_queue(SC_BUTTON_EVENT_PRESSED);
   CHECK(sc_app_service(&app, 70u) == SC_APP_OK);
   fake_button_queue(SC_BUTTON_EVENT_RELEASED);

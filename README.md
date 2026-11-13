@@ -25,7 +25,7 @@ MPU6050、SSD1306 OLED 和 HC-05 属于可选辅助/遥测通道。完整硬件�
   -> sc_app 安全提交 -> TB6612
 ```
 
-正式 Debug/Release 构建只通过 `sc_app` 提交 TB6612 的 PWM 与 STBY，HC-05 入站接收关闭；Bench 固件保留原有台架命令，并同样启用 IWDG。名义标定、双轮悬空条件下，200 和 478 mm/s 均已连续完成 3 轮 2 秒阶跃，故 `SC_MOTOR_TUNING_VALID=1`；每转计数、轮径和方向仍待十圈人工核实，`SC_MOTOR_CALIBRATION_VALID=0`。正式固件仍会拒绝发车。完整实车边界见[循迹调试日志](docs/循迹调试日志.md)，控制与实验状态见[实现与实验记录](docs/双轮速度控制实现与实验记录.md)。
+正式 Debug/Release 构建只通过 `sc_app` 提交 TB6612 的 PWM 与 STBY，HC-05 入站接收关闭；Bench 固件保留原有台架命令，并同样启用 IWDG。用户游标卡尺实测左右轮径为 `48.600 mm`，默认巡航为 `500 mm/s`。新标尺三轮 Identify 得到 `vL396=496`、`vR396=502`、离散度均 `1.2%`，固化 `FF_L=798/FF_R=789`、`Kp=100/Ki=750/Kd=0`；随后 200 和 500 mm/s 各连续三轮 2 秒闭环阶跃全部通过，`SC_MOTOR_TUNING_VALID=1`。十圈里程计和方向标定尚未完成，`SC_MOTOR_CALIBRATION_VALID=0`，正式固件仍拒绝发车。
 
 | 模块 | 当前状态 |
 |---|---|
@@ -106,10 +106,10 @@ pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action Probe
 pwsh .\tools\sc_bt_bench.ps1 -Port COM13 -Action DirectionMatrix -ExecuteMotion
 pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Identify
 pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action SetPid -Wheel B -KpMilli 100 -KiMilli 750 -KdMilli 0
-pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 478
+pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 500
 ```
 
-`sc_hc05_tune.ps1` 的所有动作都要求：Windows 能通过 COM 设备 DeviceID 读取 ContainerId，且同一 PnP Container 中存在名称匹配 `HC-05` 的设备。ContainerId 不可查、同容器无 HC-05、CH340 或普通 USB 串口均拒绝；不再凭通用 Bluetooth 名称放行。CAPTURE 导出窗口统一至少 30s，覆盖 201 行约 80 B/行在 9600 8N1 下的约 17s 传输。工具先解析 BEGIN 的 expected count，再核对 CAP 行数精确相等、时间戳严格递增、模式一致及 Identify/Step 的时长覆盖和非零 fault；不完整或故障数据保留原始日志/CSV 后抛错，不产生速度、ff 或 PID 性能结论。Identify 任一轮左右速度为非正，或左右三轮相对离散度任一超过 10% 时，只保留原始结果并给出 warning，不输出 cruise/ff 建议。日志只写到 `build/tune-logs`。实际 COM 口以设备管理器为准。所有运动命令都会驱动真实电机，只能在双轮悬空、电池和 ST-Link 已互斥连接时使用。`PID` 只改掉电即丢失的 RAM 参数，不修改源码或编译期 VALID 标志；当前已验收增益固化在 `sc_motor_defaults.h`，后续候选仍须重新完成三轮阶跃验收。
+`sc_hc05_tune.ps1` 的所有动作都要求：Windows 能通过 COM 设备 DeviceID 读取 ContainerId，且同一 PnP Container 中存在名称匹配 `HC-05` 的设备。ContainerId 不可查、同容器无 HC-05、CH340 或普通 USB 串口均拒绝；不再凭通用 Bluetooth 名称放行。CAPTURE 导出窗口统一至少 30s，覆盖 201 行约 80 B/行在 9600 8N1 下的约 17s 传输。工具先解析 BEGIN 的 expected count，再核对 CAP 行数精确相等、时间戳严格递增、模式一致及 Identify/Step 的时长覆盖和非零 fault；不完整或故障数据保留原始日志/CSV 后抛错，不产生速度、ff 或 PID 性能结论。Identify 任一轮左右速度为非正，或左右三轮相对离散度任一超过 10% 时，只保留原始结果并给出 warning，不输出 cruise/ff 建议。日志只写到 `build/tune-logs`。实际 COM 口以设备管理器为准。所有运动命令都会驱动真实电机，只能在双轮悬空、电池和 ST-Link 已互斥连接时使用。`PID` 只改掉电即丢失的 RAM 参数，不修改源码或编译期 VALID 标志；当前 `FF_L=798/FF_R=789/Kp=100/Ki=750/Kd=0` 已通过新标尺 200/500 mm/s 三轮闭环验收。
 
 ## 验证状态
 
@@ -137,8 +137,8 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 478
 | 预设 | RAM | Flash | 相对上一版 |
 |---|---:|---:|---|
 | Debug | `5192 B` | `58732 B` | `0 B` / `-72 B` |
-| Release | `5184 B` | `31428 B` | `0 B` / `+4 B` |
-| Bench | `12552 B` | `62208 B` | `0 B` / `0 B` |
+| Release | `5184 B` | `31436 B` | `0 B` / `+8 B` |
+| Bench | `12552 B` | `62228 B` | `0 B` / `+20 B` |
 
 资源差值为本轮参数固化相对上一记录的变化。Release ELF 含 `sc_app_*`、`sc_telemetry_*`、`sc_safety_iwdg_*`，不含 CAPTURE 缓冲、RX 命令解析、`sc_bt_bench_*` 或 `RAW/SPEED/PID/CAPTURE` 命令字符串；Bench ELF 保留完整调参命令与捕获缓冲。
 
@@ -147,14 +147,17 @@ pwsh .\tools\sc_hc05_tune.ps1 -Port COM13 -Action Step -Wheel B -TargetMmS 478
 - TB6612 左右通道隔离、单轮短脉冲、自动停机和霍尔计数已验证。
 - 右电机方向接反已通过交换动力线纠正；后续 Wheel Service 需采用左编码器 `-1`、右编码器 `+1` 的名义方向映射。
 - HC-05 SPP 已通过 `COM13 @ 9600 8N1` 完成命令交互。
-- 名义标定、双轮悬空下，200 和 478 mm/s 各连续 3 轮 2 秒阶跃通过；每轮 201 个 100 Hz 样本，均无饱和或故障。200 mm/s 的尾段 MAE 为 `0.825..6.6375 mm/s`、超调 `0..3%`、调节时间 `0.21..0.23 s`；478 mm/s 分别为 `10.2375..13.6875 mm/s`、`6.0669..8.5774%`、`0.30 s`。
-- 参数固化后的 Bench 重新烧录并通过冷启动回读确认 `FF=803/Kp=100/Ki=750/Kd=0`；200 和 478 mm/s 各复测一次均通过，左右尾段 MAE 分别为 `0.6375/4.7625 mm/s` 和 `9.3/7.05 mm/s`，超调均低于 `7%`，调节时间均不超过 `0.36 s`，无饱和或故障。
+- 旧 `48.000 mm` 标尺历史证据（不计入当前验收）：200 和 478 mm/s 各连续 3 轮 2 秒阶跃，每轮 201 个 100 Hz 样本；478 档尾段 MAE 为 `10.2375..13.6875 mm/s`、超调 `6.0669..8.5774%`、调节时间 `0.30 s`，均无饱和或故障。
+- 旧标尺参数固化后的冷启动复测也仅作历史：478 mm/s 左右尾段 MAE 为 `9.3/7.05 mm/s`，超调为 `5.0209/6.0669%`，调节时间 `0.30/0.30 s`。
+- 48.60 mm 标尺三轮 Identify 已完成，日志时间戳为 `20261113-112810`：`vL396=496 mm/s`、`vR396=502 mm/s`，左右相对离散度均为 `1.2%`，工具建议 `ffL=798`、`ffR=789`，`check-update` 已接受。
+- 48.60 mm 新标尺闭环验收完成：200 mm/s 三轮日志为 `20261113-113336`、`20261113-113400`、`20261113-113423`，左右尾段 MAE 分别为 `0.9375..1.6875/2.2875..5.775 mm/s`，超调 `0..3%`，调节时间 `0.23..0.38 s`。
+- 500 mm/s 三轮日志为 `20261113-113449`、`20261113-113516`、`20261113-113538`，左右尾段 MAE 分别为 `9.95..10.475/8.525..11.825 mm/s`，超调 `5.8..6.8%`，调节时间 `0.31..0.32 s`。六轮闭环均每轮 201 个 2 秒样本，无饱和或 fault。
 
 尚未验证：
 
 - LF04 约 3 cm 安装高度与完整赛道仍需复测；白底/黑线极性、逐路响应、O1-O4 左右顺序、中心直行与十字直行已完成实物验证。
 - 十圈计数、轮径和编码器/电机方向的最终人工标定尚未完成，`SC_MOTOR_CALIBRATION_VALID` 保持 0，因此正式默认配置不能发车。
-- 478 mm/s 的整车负载、赛道循迹、堵转电流、温升、长时间运行、满电负载供电和完整赛道表现尚未验证。
+- 48.60 mm 台架调参已通过，但整车负载、赛道循迹、堵转电流、温升、长时间运行、满电负载供电和完整赛道表现尚未验证。
 
 ## 安全约束
 
@@ -186,7 +189,7 @@ ctest --test-dir build/host-sc-line --output-on-failure
 
 ## 后续工作
 
-1. 人工转动左右轮各 10 圈，核对每转计数、48 mm 轮径、编码器和电机方向；全部通过后才设置 `SC_MOTOR_CALIBRATION_VALID=1`。
-2. 在整车负载下重新观察 478 mm/s 目标，确认台架增益裕量和堵转/温升边界。
+1. 人工转动左右轮各 10 圈，核对每转计数、48.60 mm 轮径、编码器和电机方向；全部通过后才设置 `SC_MOTOR_CALIBRATION_VALID=1`。
+2. 保持 `FF_L=798/FF_R=789`、`Kp=100/Ki=750/Kd=0` 和 `SC_MOTOR_TUNING_VALID=1` 的 48.60 mm 台架基线，记录整车负载下是否需要保守降速。
 3. 在完整比赛赛道复测当前循迹参数，并固定 LF04 安装高度和阈值。
 4. 完成整车供电、长时间运行、温升、IWDG 复位可见性和比赛赛道测试。
