@@ -85,16 +85,18 @@ static int test_defaults_match_bench_state(void)
   sc_app_config_t config;
 
   sc_app_get_default_config(&config);
-  CHECK(config.calibration_valid == 0u);
+  CHECK(config.calibration_valid == 1u);
   CHECK(config.tuning_valid == 1u);
   CHECK(config.cruise_mm_s == 500);
+  CHECK(config.wheel_calibration.left_counts_per_rev == 1061u);
+  CHECK(config.wheel_calibration.right_counts_per_rev == 1061u);
   CHECK(config.wheel_calibration.left_wheel_diameter_um == 48600);
   CHECK(config.wheel_calibration.right_wheel_diameter_um == 48600);
-  CHECK(config.speed_controller.left.ff_milli == 798);
+  CHECK(config.speed_controller.left.ff_milli == 810);
   CHECK(config.speed_controller.left.kp_milli == 100);
   CHECK(config.speed_controller.left.ki_milli == 750);
   CHECK(config.speed_controller.left.kd_milli == 0);
-  CHECK(config.speed_controller.right.ff_milli == 789);
+  CHECK(config.speed_controller.right.ff_milli == 815);
   CHECK(config.speed_controller.right.kp_milli == 100);
   CHECK(config.speed_controller.right.ki_milli == 750);
   CHECK(config.speed_controller.right.kd_milli == 0);

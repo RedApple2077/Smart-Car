@@ -345,20 +345,20 @@ static int test_invalid_or_stale_feedback(void)
   return 0;
 }
 
-static int test_defaults_match_validated_bench_config(void)
+static int test_defaults_match_calibrated_bench_config(void)
 {
-  _Static_assert(SC_MOTOR_CALIBRATION_VALID == 0u,
-                 "default calibration must remain unverified");
+  _Static_assert(SC_MOTOR_CALIBRATION_VALID == 1u,
+                 "user-waived calibration must be marked valid");
   _Static_assert(SC_MOTOR_TUNING_VALID == 1u,
-                 "closed-loop bench tuning must be marked valid");
+                 "1061-CPR bench tuning must be marked valid");
   _Static_assert(SC_MOTOR_LEFT_ENCODER_SIGN == -1,
                  "left encoder nominal sign changed");
   _Static_assert(SC_MOTOR_RIGHT_ENCODER_SIGN == 1,
                  "right encoder nominal sign changed");
-  _Static_assert(SC_MOTOR_LEFT_COUNTS_PER_REV == 1040u,
-                 "left encoder nominal CPR changed");
-  _Static_assert(SC_MOTOR_RIGHT_COUNTS_PER_REV == 1040u,
-                 "right encoder nominal CPR changed");
+  _Static_assert(SC_MOTOR_LEFT_COUNTS_PER_REV == 1061u,
+                 "left encoder measured CPR changed");
+  _Static_assert(SC_MOTOR_RIGHT_COUNTS_PER_REV == 1061u,
+                 "right encoder measured CPR changed");
   _Static_assert(SC_MOTOR_LEFT_WHEEL_DIAMETER_UM == 48600,
                  "left wheel caliper diameter changed");
   _Static_assert(SC_MOTOR_RIGHT_WHEEL_DIAMETER_UM == 48600,
@@ -369,7 +369,7 @@ static int test_defaults_match_validated_bench_config(void)
                  "right motor nominal sign changed");
   _Static_assert(SC_MOTOR_CRUISE_SPEED_MM_S == 500,
                  "cruise speed does not match recalibration target");
-  _Static_assert(SC_MOTOR_LEFT_FF_MILLI == 798,
+  _Static_assert(SC_MOTOR_LEFT_FF_MILLI == 810,
                  "left feedforward does not match identified value");
   _Static_assert(SC_MOTOR_LEFT_KP_MILLI == 100,
                  "left Kp does not match validated value");
@@ -377,7 +377,7 @@ static int test_defaults_match_validated_bench_config(void)
                  "left Ki does not match validated value");
   _Static_assert(SC_MOTOR_LEFT_KD_MILLI == 0,
                  "left Kd does not match validated value");
-  _Static_assert(SC_MOTOR_RIGHT_FF_MILLI == 789,
+  _Static_assert(SC_MOTOR_RIGHT_FF_MILLI == 815,
                  "right feedforward does not match identified value");
   _Static_assert(SC_MOTOR_RIGHT_KP_MILLI == 100,
                  "right Kp does not match validated value");
@@ -494,8 +494,8 @@ static const test_case_t s_tests[] = {
   {"first_feedback_wait", test_first_feedback_wait},
   {"duplicate_feedback_is_bumpless", test_duplicate_feedback_is_bumpless},
   {"invalid_or_stale_feedback", test_invalid_or_stale_feedback},
-  {"defaults_match_validated_bench_config",
-   test_defaults_match_validated_bench_config},
+  {"defaults_match_calibrated_bench_config",
+   test_defaults_match_calibrated_bench_config},
   {"pid_update_requires_stopped_and_bounds",
    test_pid_update_requires_stopped_and_bounds},
   {"argument_validation", test_argument_validation}
