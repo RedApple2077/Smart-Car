@@ -32,9 +32,29 @@ typedef struct {
   uint32_t recovery_first_sample_time_ms;
   uint32_t recovery_last_sample_time_ms;
   uint32_t recovery_last_sequence;
+  uint32_t crossing_start_ms;
+  uint32_t crossing_entry_last_sample_time_ms;
+  uint32_t crossing_entry_last_sequence;
+  uint32_t crossing_center_first_sample_time_ms;
+  uint32_t crossing_center_last_sample_time_ms;
+  uint32_t crossing_center_last_sequence;
+  uint32_t crossing_ordinary_last_sample_time_ms;
+  uint32_t crossing_ordinary_last_sequence;
+  uint32_t crossing_white_start_ms;
+  uint32_t crossing_cooldown_start_ms;
   uint8_t recovery_sample_count;
   uint8_t recovery_has_sequence;
   uint8_t recovering;
+  uint8_t crossing_entry_sample_count;
+  uint8_t crossing_entry_has_sequence;
+  uint8_t crossing_active;
+  uint8_t crossing_center_sample_count;
+  uint8_t crossing_center_has_sequence;
+  uint8_t crossing_ordinary_sample_count;
+  uint8_t crossing_ordinary_has_sequence;
+  uint8_t crossing_ordinary_last_mask;
+  uint8_t crossing_white_active;
+  uint8_t crossing_cooldown_active;
 } sc_track_controller_t;
 
 /**
@@ -50,10 +70,13 @@ uint8_t sc_track_start_eligible(const sc_line_state_t *line);
 
 /**
  * @brief  根据 LF04 掩码生成左右有符号轮速目标。
- *         短时丢线沿最后一次有效偏移方向低速找线；未知方向、超时、
- *         无效线型或未完成连续三帧重捕时停止或保持 recovering。
+ *         普通已知方向全白时沿最后一次有效偏移方向持续低速找线，不设
+ *         超时；未知方向立即 lost，无效线型立即报错。
  *         重捕候选要求 sequence 新鲜、相邻样本间隔 1..30 ms，首末至少 20 ms；
- *         首次白帧的 1000 ms 总期限不重开。
+ *         重捕期间 junction 不参与候选且不重开首次丢线时间戳。
+ *         十字候选要求连续三帧 junction、sequence 新鲜且相邻间隔 1..30 ms；
+ *         未确认时输出中心目标；确认后固定最多直行 500 ms，连续三帧中心
+ *         或普通样本才恢复普通策略，十字内全白超过 100 ms 立即停车。
  */
 sc_track_status_t sc_track_controller_step(sc_track_controller_t *controller,
                                            const sc_line_state_t *line,

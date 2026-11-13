@@ -27,15 +27,38 @@ enable_testing()
 foreach(test_case IN ITEMS
     ratio_table
     cruise_scaling_and_clamp
-    center_and_junction_clear_direction
+    fine_steering_is_conservative
+    severe_steering_derates_and_does_not_overspeed
+    center_clears_direction
+    single_junction_does_not_enter
+    all_junction_masks_enter
+    junction_entry_requires_three_fresh_samples
+    crossing_bridges_short_nonjunction_samples
+    crossing_persistent_junction_times_out_with_cooldown
+    crossing_exits_on_three_center_samples
+    crossing_ordinary_line_exits_after_three
+    crossing_alternating_ordinary_masks_do_not_exit
+    crossing_ordinary_candidate_rejects_gap_and_duplicate
+    crossing_white_window_stops
+    crossing_timeout_single_ordinary_stops
+    crossing_deadline_and_center_priority
+    invalid_sample_clears_crossing
     unconditional_all_white_stop
     left_and_right_search
     single_black_sample_does_not_reset_recovery
     three_fresh_samples_and_minimum_time_confirm
+    recovering_junction_masks_excluded
+    recovering_junction_resets_candidate
+    recovery_candidate_window_and_wrap
+    recovery_mixed_ordinary_masks_confirm
+    recovery_ordinary_reconfirms_crossing
     duplicate_sequence_does_not_confirm
-    alternating_white_black_uses_total_deadline
+    alternating_white_black_without_timeout
+    lost_search_without_timeout
+    recovering_full_black_context
+    recovering_full_black_timeline_endpoint
+    invalid_line_clears_recovery
     recovery_candidate_rejects_gap_and_duplicate
-    recovery_timeout_and_invalid_lines
     ambiguous_patterns_and_arguments
     start_eligibility
 )
