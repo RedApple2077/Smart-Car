@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $testSource = Join-Path $repoRoot "tests/sc_app"
 $productionSource = Join-Path $repoRoot "Core/Src/sc_app.c"
+$trackSource = Join-Path $repoRoot "Core/Src/sc_track.c"
 $runId = [guid]::NewGuid().ToString("N")
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) `
   ("smart-car-sc-app-mutants-" + $runId)
@@ -35,13 +36,22 @@ function Invoke-Native {
 function Build-TestExecutable {
   param(
     [Parameter(Mandatory = $true)][string]$Name,
-    [Parameter(Mandatory = $true)][string]$SourcePath
+    [Parameter(Mandatory = $true)][string]$SourcePath,
+    [string]$TrackSourcePath
   )
 
   $buildDirectory = Join-Path $buildRootResolved $Name
-  Invoke-Native "cmake" -S $testSource -B $buildDirectory `
-    -G $Generator -DCMAKE_BUILD_TYPE=Release `
-    "-DCMAKE_C_COMPILER=$Compiler" "-DSC_APP_SOURCE=$SourcePath"
+  if ([string]::IsNullOrWhiteSpace($TrackSourcePath)) {
+    Invoke-Native "cmake" -S $testSource -B $buildDirectory `
+      -G $Generator -DCMAKE_BUILD_TYPE=Release `
+      "-DCMAKE_C_COMPILER=$Compiler" "-DSC_APP_SOURCE=$SourcePath"
+  }
+  else {
+    Invoke-Native "cmake" -S $testSource -B $buildDirectory `
+      -G $Generator -DCMAKE_BUILD_TYPE=Release `
+      "-DCMAKE_C_COMPILER=$Compiler" "-DSC_APP_SOURCE=$SourcePath" `
+      "-DSC_TRACK_SOURCE=$TrackSourcePath"
+  }
   Invoke-Native "cmake" --build $buildDirectory
   return $buildDirectory
 }
@@ -49,7 +59,8 @@ function Build-TestExecutable {
 function Invoke-ExpectedFailure {
   param(
     [Parameter(Mandatory = $true)][string]$BuildDirectory,
-    [Parameter(Mandatory = $true)][string]$TestName
+    [Parameter(Mandatory = $true)][string]$TestName,
+    [string]$ExpectedExpression
   )
 
   Write-Host "EXPECT FAIL: $TestName"
@@ -71,8 +82,12 @@ function Invoke-ExpectedFailure {
   if ($process.ExitCode -eq 0) {
     throw "mutant escaped detection: $TestName"
   }
+  $failurePattern = "CHECK failed at "
+  if (-not [string]::IsNullOrWhiteSpace($ExpectedExpression)) {
+    $failurePattern += ".*: " + [regex]::Escape($ExpectedExpression)
+  }
   if (($standardOutput + "`n" + $standardError) -notmatch
-      "CHECK failed at ") {
+      $failurePattern) {
     throw "mutant target did not execute a failing assertion: $TestName"
   }
 }
@@ -81,13 +96,21 @@ function Invoke-Mutant {
   param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Original,
-    [Parameter(Mandatory = $true)][string]$Replacement,
-    [Parameter(Mandatory = $true)][string]$TestName
+    [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Replacement,
+    [Parameter(Mandatory = $true)][string]$TestName,
+    [string]$TrackPath,
+    [string]$ExpectedExpression
   )
 
   $utf8 = [Text.UTF8Encoding]::new($false)
+  $sourceToMutate = if ([string]::IsNullOrWhiteSpace($TrackPath)) {
+    $productionSource
+  }
+  else {
+    $trackSource
+  }
   $sourceText = [IO.File]::ReadAllText(
-    $productionSource, $utf8).Replace("`r`n", "`n")
+    $sourceToMutate, $utf8).Replace("`r`n", "`n")
   $normalizedOriginal = $Original.Replace("`r`n", "`n")
   $normalizedReplacement = $Replacement.Replace("`r`n", "`n")
   if (-not $sourceText.Contains($normalizedOriginal)) {
@@ -98,8 +121,15 @@ function Invoke-Mutant {
     $mutantPath,
     $sourceText.Replace($normalizedOriginal, $normalizedReplacement),
     $utf8)
-  $build = Build-TestExecutable -Name $Name -SourcePath $mutantPath
-  Invoke-ExpectedFailure -BuildDirectory $build -TestName $TestName
+  if ([string]::IsNullOrWhiteSpace($TrackPath)) {
+    $build = Build-TestExecutable -Name $Name -SourcePath $mutantPath
+  }
+  else {
+    $build = Build-TestExecutable -Name $Name -SourcePath $productionSource `
+      -TrackSourcePath $mutantPath
+  }
+  Invoke-ExpectedFailure -BuildDirectory $build -TestName $TestName `
+    -ExpectedExpression $ExpectedExpression
   $script:mutantCount++
 }
 
@@ -146,6 +176,27 @@ static uint8_t sc_app_start_config_valid(const sc_app_t *app)
     if ((stall_condition != 0u) && (physical_delta <= 0))
 '@ `
     -TestName "jittery_counts_fail_progress_window"
+
+  Invoke-Mutant -Name "stall_target_zero_enabled" `
+    -Original "    (target_mm_s >= SC_APP_STALL_TARGET_MM_S) &&" `
+    -Replacement "    (target_mm_s >= 0) &&" `
+    -TestName "stall_gate_thresholds"
+
+  Invoke-Mutant -Name "stall_target_positive_only" `
+    -Original "    (target_mm_s >= SC_APP_STALL_TARGET_MM_S) &&" `
+    -Replacement "    (target_mm_s > 0) &&" `
+    -TestName "stall_gate_thresholds"
+
+  Invoke-Mutant -Name "stall_pwm_zero_enabled" `
+    -Original @'
+    (sc_app_abs_i16(output_permille) >=
+     SC_APP_STALL_PWM_PERMILLE));
+'@ `
+    -Replacement @'
+    (sc_app_abs_i16(output_permille) >=
+     0));
+'@ `
+    -TestName "stall_gate_thresholds"
 
   Invoke-Mutant -Name "direction_not_fatal" `
     -Original "    if (app->reverse_samples[side] >= SC_APP_REVERSE_SAMPLES)" `
@@ -214,6 +265,97 @@ static uint8_t sc_app_start_config_valid(const sc_app_t *app)
   snapshot->left_pwm = app->speed_output.left_permille;
 '@ `
     -TestName "snapshot_pwm_uses_motor_sign"
+
+  Invoke-Mutant -Name "recovering_junction_not_excluded" `
+    -Original @'
+    if ((controller->last_turn_direction != 0) &&
+        (sc_track_is_junction(line->black_mask) != 0u))
+    {
+      sc_track_reset_recovery_candidate(controller);
+      return sc_track_output_search(controller, target_out);
+    }
+
+'@ `
+    -Replacement "" `
+    -TestName "recovering_junction_search_stays_active" `
+    -TrackPath $trackSource `
+    -ExpectedExpression "app.track.recovery_sample_count == 0u"
+
+  Invoke-Mutant -Name "recovering_full_black_timeline_not_excluded" `
+    -Original @'
+    if ((controller->last_turn_direction != 0) &&
+        (sc_track_is_junction(line->black_mask) != 0u))
+    {
+      sc_track_reset_recovery_candidate(controller);
+      return sc_track_output_search(controller, target_out);
+    }
+
+'@ `
+    -Replacement "" `
+    -TestName "recovering_full_black_timeline_stays_active" `
+    -TrackPath $trackSource `
+    -ExpectedExpression "(last_now_ms == 11530u) && (final_status == SC_APP_OK)"
+
+  Invoke-Mutant -Name "track_recovering_treated_as_fault" `
+    -Original @'
+    if (track_status == SC_TRACK_ERR_LOST)
+    {
+      return SC_APP_FAULT_LINE_LOST;
+    }
+'@ `
+    -Replacement @'
+    if (track_status == SC_TRACK_RECOVERING)
+    {
+      return SC_APP_FAULT_LINE_LOST;
+    }
+    if (track_status == SC_TRACK_ERR_LOST)
+    {
+      return SC_APP_FAULT_LINE_LOST;
+    }
+'@ `
+    -TestName "recovering_junction_search_stays_active" `
+    -ExpectedExpression "sc_app_service(app, 100u) == SC_APP_OK"
+
+  Invoke-Mutant -Name "track_err_lost_swallowed" `
+    -Original @'
+    if (track_status == SC_TRACK_ERR_LOST)
+    {
+      return SC_APP_FAULT_LINE_LOST;
+    }
+'@ `
+    -Replacement "" `
+    -TestName "active_all_white_faults" `
+    -ExpectedExpression "sc_app_service(&app, 90u) == SC_APP_FAULT_RECOVERABLE"
+
+  Invoke-Mutant -Name "recovering_feedback_stale_ignored" `
+    -Original @'
+  else if (sc_app_feedback_fresh(app, now_ms) == 0u)
+  {
+    return SC_APP_FAULT_FEEDBACK;
+  }
+'@ `
+    -Replacement @'
+  else if (0)
+  {
+    return SC_APP_FAULT_FEEDBACK;
+  }
+'@ `
+    -TestName "recovering_search_feedback_faults" `
+    -ExpectedExpression "sc_app_service(&app, 150u) == SC_APP_FAULT_RECOVERABLE"
+
+  Invoke-Mutant -Name "recovering_safe_stop_keeps_target" `
+    -Original @'
+  app->speed_output = (sc_speed_controller_output_t){0};
+  app->target = (sc_wheel_target_t){0};
+  app->software_stby = 0u;
+'@ `
+    -Replacement @'
+  app->speed_output = (sc_speed_controller_output_t){0};
+  /* target intentionally retained for mutant isolation. */
+  app->software_stby = 0u;
+'@ `
+    -TestName "recovering_search_outer_stall_faults" `
+    -ExpectedExpression "app->target.left_mm_s == 0"
 
   Write-Host ("MUTANT SUMMARY: baseline passed; {0}/{0} mutants failed target tests" -f $mutantCount)
 }

@@ -367,8 +367,8 @@ static int test_defaults_match_calibrated_bench_config(void)
                  "left motor nominal sign changed");
   _Static_assert(SC_MOTOR_RIGHT_MOTOR_SIGN == 1,
                  "right motor nominal sign changed");
-  _Static_assert(SC_MOTOR_CRUISE_SPEED_MM_S == 500,
-                 "cruise speed does not match recalibration target");
+  _Static_assert(SC_MOTOR_CRUISE_SPEED_MM_S == 400,
+                 "ground tracking speed does not match current experiment");
   _Static_assert(SC_MOTOR_LEFT_FF_MILLI == 810,
                  "left feedforward does not match identified value");
   _Static_assert(SC_MOTOR_LEFT_KP_MILLI == 100,

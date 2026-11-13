@@ -162,6 +162,8 @@ typedef struct {
   sc_speed_controller_t speed_controller;
 } sc_app_t;
 
+uint8_t sc_app_stall_gate(int32_t target_mm_s, int16_t output_permille);
+
 void sc_app_get_default_config(sc_app_config_t *config);
 
 sc_app_status_t sc_app_init(sc_app_t *app, const sc_app_config_t *config,

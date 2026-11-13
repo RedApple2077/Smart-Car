@@ -56,14 +56,24 @@ foreach(test_case IN ITEMS
     full_white_and_invalid_config_block_start
     long_press_stops_then_new_click_restarts
     active_all_white_faults
+    known_direction_white_search_stays_active
+    recovering_junction_search_stays_active
+    recovering_full_black_timeline_stays_active
+    recovering_search_outer_stall_faults
+    recovering_search_feedback_faults
+    recovering_search_wrong_direction_fault
+    recovering_search_tb_and_line_faults
     recoverable_health_without_new_press_no_restart
     line_lost_recovery_requires_center
     feedback_recovery_requires_nonwhite_line
     tb_fault_is_fatal
+    stall_gate_thresholds
     single_wheel_stall
     jittery_counts_fail_progress_window
     real_progress_passes_stall_window
     inner_zero_target_no_stall
+    subthreshold_inner_target_no_stall
+    subthreshold_pwm_no_stall
     negative_command_forward_counts_no_direction_fault
     negative_command_reverse_counts_not_direction_fatal
     reverse_direction_is_fatal

@@ -21,6 +21,14 @@ static int16_t sc_app_abs_i16(int16_t value)
   return (value < 0) ? (int16_t)-value : value;
 }
 
+uint8_t sc_app_stall_gate(int32_t target_mm_s, int16_t output_permille)
+{
+  return (uint8_t)(
+    (target_mm_s >= SC_APP_STALL_TARGET_MM_S) &&
+    (sc_app_abs_i16(output_permille) >=
+     SC_APP_STALL_PWM_PERMILLE));
+}
+
 static uint8_t sc_app_config_structural_valid(
   const sc_app_config_t *config)
 {
@@ -485,9 +493,7 @@ static uint32_t sc_app_monitor_wheel_health(
       (uint8_t)(((command_sign > 0) && (physical_delta < 0)) ||
                 ((command_sign < 0) && (physical_delta > 0)));
     uint8_t stall_condition =
-      (uint8_t)((targets[side] >= SC_APP_STALL_TARGET_MM_S) &&
-                (sc_app_abs_i16(outputs[side]) >=
-                 SC_APP_STALL_PWM_PERMILLE));
+      sc_app_stall_gate(targets[side], outputs[side]);
 
     if ((command_matches_target != 0u) && (command_reversed != 0u))
     {
