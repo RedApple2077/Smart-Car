@@ -346,6 +346,26 @@ static int test_arguments_and_calibration(void)
   CHECK(sc_wheel_service_update(
           &service, &snapshot, &calibration, 10u, &feedback) ==
         SC_WHEEL_SERVICE_ERR_CALIBRATION);
+
+  calibration = default_calibration();
+  calibration.left_wheel_diameter_um = 48600;
+  calibration.right_wheel_diameter_um = 48600;
+  CHECK(sc_wheel_service_init(&service, &calibration) ==
+        SC_WHEEL_SERVICE_OK);
+  for (uint32_t index = 0u; index < 6u; index++)
+  {
+    snapshot = make_snapshot(
+      10u * (index + 1u), 10u, index + 1u,
+      -7 * (int64_t)(index + 1u),
+      3 * (int64_t)(index + 1u));
+    CHECK(push_snapshot(
+            &service, &calibration, &snapshot,
+            10u * (index + 1u), &feedback) ==
+          ((index == 5u) ? SC_WHEEL_SERVICE_OK :
+                           SC_WHEEL_SERVICE_WARMUP));
+  }
+  CHECK(feedback.left_speed_mm_s == 103);
+  CHECK(feedback.right_speed_mm_s == 44);
   return 0;
 }
 

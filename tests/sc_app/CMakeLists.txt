@@ -47,7 +47,7 @@ endif()
 enable_testing()
 
 foreach(test_case IN ITEMS
-    defaults_unverified
+    defaults_match_bench_state
     power_on_held_release_does_not_start
     isolated_release_does_not_start
     center_window_and_start_order

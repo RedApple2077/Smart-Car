@@ -10,7 +10,7 @@
 
 第二块 STM32F103C8T6、第二块 TB6612FNG、第二块 MPU6050 和第二个 HC-05 均作为备件。HC-SR04、SG90 云台和 PS/2 摇杆不进入比赛运行功能。面包板只用于原型验证，不作为比赛行驶时的可靠连接结构。
 
-本文定义硬件连接、硬件模块边界、可实现 C 接口和验收方法，不提供已验证 PID 增益。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART2 和相应 GPIO；设备驱动、非阻塞 Service、Wheel Service、双轮速度控制、循迹 `mm/s` 目标策略、正式 `sc_app` 安全状态机、IWDG、遥测/OLED 和独立 HC-05 Bench 已完成。三套固件均可构建，正式链与 Bench 保持隔离。
+本文定义硬件连接、硬件模块边界、可实现 C 接口和验收方法。当前 `Smart-Car.ioc` 已写入 SWD、SysTick、8 MHz HSE PLL 至 72 MHz、TIM2/TIM3 编码器接口、TIM4 双路 PWM、I2C2、USART2 和相应 GPIO；设备驱动、非阻塞 Service、Wheel Service、双轮速度控制、循迹 `mm/s` 目标策略、正式 `sc_app` 安全状态机、IWDG、遥测/OLED 和独立 HC-05 Bench 已完成。用户游标卡尺实测左右轮径为 `48.600 mm`，左右 CPR 均为 `1061`。新 CPR Identify 固化 `FF_L=810/FF_R=815`，200/500 mm/s 各连续三轮闭环通过，`SC_MOTOR_TUNING_VALID=1`。标定依据为卡尺直径、十圈中位 1061 CPR、编码器符号和正命令两轮向前；落地滚动周长未测但经用户明确豁免，`SC_MOTOR_CALIBRATION_VALID=1`。旧 FF 798/789 和旧 200/500 mm/s 结果均已失效。
 
 ### 1.1 比赛边界
 
@@ -27,12 +27,12 @@
 - 不使用 HC-SR04、SG90 或 PS/2 摇杆完成比赛功能。
 - 不将 MPU6050 当作绝对航向源，不使用长期陀螺仪积分替代 LF04。
 - 不把 LF04 的离散死区输入描述为连续位置传感器。
-- 不在本文填写 PID 增益、丢线找回时长、比赛速度或停车延时。
+- 不把名义标定、双轮悬空台架通过的增益描述为整车负载或赛道性能已验证。
 - 不修改现有 CubeMX、HAL、CMake、源码或硬件原件。
 
 ### 1.3 当前工程事实
 
-以下事实核对于 2026-11-12。只记录当前配置、源码和已执行验证中可以确认的状态，不把驱动存在等同于设备在线、控制闭环或整车身验证已经完成。
+以下事实核对于 2026-11-13。只记录当前配置、源码和已执行验证中可以确认的状态，不把驱动存在等同于设备在线、控制闭环或整车身验证已经完成。
 
 - 工程路径：`C:\Users\RedApple\Documents\Smart-Car`。
 - 工程格式：STM32CubeMX 生成的 HAL 工程，CMake 构建，C11 标准。`CMakePresets.json` 提供 `Debug`、`Release` 和独立 `Bench` 预设，使用 Ninja 与 `cmake/gcc-arm-none-eabi.cmake` 工具链。
@@ -48,10 +48,10 @@
 - 电机与状态输出：`PA4/AIN1`、`PA5/AIN2`、`PB0/BIN1`、`PB1/BIN2`、`PB8/TB6612_STBY`、`PB9/STATUS_LED` 均为推挽输出。正式固件初始化 TB6612 后保持 STBY 低。
 - 正式主循环：每 10 ms 推进 LF04/线路语义；每轮服务编码器，仅在新 sequence 时进入 Wheel Service；仅在新的有效双轮反馈上推进速度控制；`sc_app` 应用启动门、状态机、故障检测和唯一执行器提交。遥测 Service 在核心控制之后推进，IWDG 在全部必要 Service 完成后最后喂狗。
 - Bench 主循环：保留原有 LF04、编码器、蓝牙命令、心跳、MPU、OLED、UART 和限时单轮控制；同样只使用 `sc_safety_iwdg_init/feed` 接入看门狗。
-- 正式/Bench 隔离：正式 Debug/Release 不链接 `sc_bt_bench`，不包含蓝牙运动命令；Bench 产物为 `build/Bench/Smart-Car-HC05Bench.elf`，提供 `PING/STATUS/LINE/LF/ARM/MOTOR/STOP/RESET/HELP`。
+- 正式/Bench 隔离：正式 Debug/Release 不链接 `sc_bt_bench`，不包含蓝牙运动命令；Bench 产物为 `build/Bench/Smart-Car-HC05Bench.elf`，提供 `PING/STATUS/LINE/LF/ARM/MOTOR/RAW/SPEED/PID/CAPTURE/STOP/RESET/HELP`。
 - 当前测试状态：UART 13/13 且缺陷变体 3/3；按键 3/3 且缺陷变体 1/1；Safety 3/3 且缺陷变体 1/1；Wheel Service 8/8 且缺陷变体 6/6；PID 6/6 且缺陷变体 4/4；双轮速度控制 10/10 且缺陷变体 7/7；循迹目标策略 13/13 且缺陷变体 7/7；I2C/MPU/OLED 15/15 且缺陷变体 13/13；TB6612/编码器 24/24 且缺陷变体 18/18；LF04/线路语义 13/13 且缺陷变体 11/11；App 24/24 且缺陷变体 10/10；Telemetry 8/8 且缺陷变体 5/5；Bench 50/50 且缺陷变体 28/28。全量 13 个主机套件共 190/190 个基线测试；Debug/Release/Bench 均通过交叉编译。
-- 当前硬件验证：TB6612 单轮短脉冲、左右通道隔离、自动停机、编码器计数和右电机方向纠正已完成台架验证；HC-05 SPP 已完成命令交互。MPU6050/OLED 的最终整车隔离、LF04 实物识别、双轮速度闭环、长稳、供电余量和赛道表现仍未验证。
-- 当前源码边界：正式闭环、应用安全状态机、故障恢复、IWDG、HC-05 5 Hz 遥测、2 Hz OLED、状态 LED、自动校零，以及 Bench 的 RAW/SPEED/PID/CAPTURE 已实现。持久化配置 Service 仍未实现；当前只有编译期默认参数与两个显式 VALID 标志。`SC_MOTOR_CALIBRATION_VALID` 和 `SC_MOTOR_TUNING_VALID` 必须保持 0，直到实物实验产生可追溯证据。
+- 当前硬件验证：TB6612 单轮短脉冲、左右通道隔离、自动停机、编码器计数和右电机方向纠正已完成台架验证；HC-05 SPP 已完成命令交互。左轮 `10602/10617`，中位 `1060.95 -> 1061 CPR`，正转原始总数为负并匹配 `-1`；右轮 CPR 样本 `1057.70/1085.10/1060.20/1061.30/1061.40`，中位 `1061.30 -> 1061`，其中 `1085.10` 为离群，正转原始总数为正并匹配 `+1`。正命令下两轮均向车体前方运动。1061 CPR 下三轮 Identify 日志 `20261113-121905` 为 `vL396=489/ vR396=486 mm/s`、离散度均 `1.0%`，建议 `ffL=810/ffR=815`。随后 200 mm/s 三轮日志 `20261113-122225/122243/122300` 的左右尾段 MAE 为 `1.2625..1.825/1.1875..3.775 mm/s`、超调 `0.5%`、调节时间左 `0.22..0.24 s`、右 `0.24..0.29 s`；500 mm/s 三轮日志 `20261113-122316/122330/122345` 为 `10.5875..11.175/11.5875..14.1875 mm/s`、超调左 `6.0%`、右 `6.4..7.6%`、左右调节时间均 `0.31 s`。六轮均每轮 201 个 2 秒样本，无饱和/fault。落地有效滚动周长未测，用户已明确豁免；几何周长与负载滚动/打滑误差仍是风险。旧 48.000 mm、1040 CPR、右轮 1060、旧 FF 798/789 及旧 200/500 mm/s 记录均只作历史。MPU6050/OLED 最终整车隔离、整车负载、长稳、供电余量和赛道表现仍未验证。
+- 当前源码边界：正式闭环、应用安全状态机、故障恢复、IWDG、HC-05 5 Hz 遥测、2 Hz OLED、状态 LED、自动校零，以及 Bench 的 RAW/SPEED/PID/CAPTURE 已实现。持久化配置 Service 仍未实现；当前配置来源为编译期常量。`SC_MOTOR_TUNING_VALID=1` 仅覆盖 1061 CPR、双轮悬空、200/500 mm/s 各三轮闭环；`SC_MOTOR_CALIBRATION_VALID=1` 覆盖卡尺、十圈计数、符号和正命令前进验证，并包含用户对落地滚动周长的豁免。
 
 ## 2. 44 项物料状态表
 
@@ -78,7 +78,7 @@
 | 17 | TB6612FNG 电机驱动模块（焊接）×2个 | 比赛主链路 | 1 块用 A/B 两路驱动左右电机；第 2 块作备件和单路热裕量替代件，不并联输出增流。 |
 | 18 | MG310 直流减速电机（含霍尔编码器）×2台 | 比赛主链路 | 左右驱动轮，含 1:20 减速、7.4V 电机、13ppr 霍尔编码器。 |
 | 19 | MG310 电机 U 型支架 ×1个 | 比赛主链路 | 作为左右电机的一组安装支撑结构，按底板长孔和轴距固定；不假设每个电机各有一个独立支架。 |
-| 20 | 48mm 橡胶轮胎 ×2个 | 比赛主链路 | 左右驱动轮轮胎，名义滚动直径 48 mm。 |
+| 20 | 48mm 橡胶轮胎 ×2个 | 比赛主链路 | 左右驱动轮轮胎，商品名义直径 48 mm；用户游标卡尺实测用于源码的滚动直径为 `48.600 mm`。 |
 | 21 | 1 英寸万向轮 ×2个 | 比赛主链路 | 作为前端两个被动支撑轮，与后端左右驱动轮组成四轮两驱布局。 |
 | 22 | R1 Mini 四轮两驱 3mm 磨砂亚克力底板 ×1块 | 比赛主链路 | 主结构底板；后端左右驱动轮，前端两个万向轮，LF04 固定在前缘中线下方。 |
 | 23 | R1 系列三轮/四轮两驱小车底板（适配 MG310）×1块 | 备件 | 第 22 项孔位或结构不适配时的替代底板；不预设两层固定叠装方式。 |
@@ -281,14 +281,15 @@ TB6612 Driver
 | 右 MG310 | `A` | `PA6 / TIM3_CH1` | 编码器输出 | 3.3V 方波 | 相序以正向前进时计数递增为标定目标。 |
 | 右 MG310 | `B` | `PA7 / TIM3_CH2` | 编码器输出 | 3.3V 方波 | 与 A 相差约 90°。 |
 
-MG310P20_7.4V 名义参数为：减速比 1:20、额定电压 7.4V、额定电流不大于 0.5A、堵转电流不大于 2.0A、霍尔编码器 13ppr、编码器供电 3.3-5V。本车固定使用 3.3V。48 mm 轮径的名义计算关系为：
+MG310P20_7.4V 名义参数为：减速比 1:20、额定电压 7.4V、额定电流不大于 0.5A、堵转电流不大于 2.0A、霍尔编码器 13ppr、编码器供电 3.3-5V。本车固定使用 3.3V。源码采用游标卡尺实测轮径 `48.600 mm`，计算关系为：
 
 - 减速后每转脉冲数：`13 × 20 = 260 pulse/rev`。
-- 四倍频计数：`260 × 4 = 1040 count/rev`。
-- 名义轮周长：`π × 48 = 150.8 mm/rev`。
-- 名义距离分辨率：`150.8 ÷ 1040 = 0.145 mm/count`。
+- 理论四倍频计数：`260 × 4 = 1040 count/rev`。
+- 标定轮周长：`π × 48.6 ≈ 152.7 mm/rev`。
+- 十圈及补测后阶段值：左 `1061 count/rev`、右 `1061 count/rev`。
+- 标定距离分辨率：左右均约 `152.7 ÷ 1061 ≈ 0.144 mm/count`。
 
-上述数值是名义计算值，最终以轮径标定结果和汇编配置为准。TB6612 单通道连续平均电流为 1.2A，峰值 3.2A；两电机同时堵转时总需求可能超过单块驱动能力，所以禁止长时间堵转，并必须实测模块温升。
+上述 CPR 已完成补测取整，但右轮仍保留一个离群记录，最终里程计标定还需复核十圈直线距离和落地有效周长。TB6612 单通道连续平均电流为 1.2A，峰值 3.2A；两电机同时堵转时总需求可能超过单块驱动能力，所以禁止长时间堵转，并必须实测模块温升。
 
 ### 4.5 LF04 四路红外
 
@@ -685,7 +686,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 
 | API | 输入 | 返回/输出 | 责任边界 |
 |---|---|---|---|
-| `sc_app_get_default_config(config)` | 配置缓冲 | 无 | 从 `sc_motor_defaults.h` 装载轮径/计数、符号、巡航速度和 PID 占位值；两个 VALID 当前均为 0。 |
+| `sc_app_get_default_config(config)` | 配置缓冲 | 无 | 从 `sc_motor_defaults.h` 装载 `48600 um` 轮径、左/右 `1061/1061 CPR`、符号、`500 mm/s` 巡航以及已通过台架闭环的 `ffL=810/ffR=815/kp=100/ki=750/kd=0`；调参和标定有效均为 1，后者包含用户豁免落地滚动周长。 |
 | `sc_app_init(app, config, now_ms)` | App、配置、时间 | `sc_app_status_t` | 初始化核心 Driver/Wheel/PID/速度控制，进入 BOOT 后固定落到 IDLE；核心初始化或结构校验失败进入 FATAL FAULT 并紧急停机。 |
 | `sc_app_service(app, now_ms)` | App、时间 | `sc_app_status_t` | 执行 10 ms 线路采样、编码器 Service、新反馈速度控制、按键状态机、故障检测、恢复健康和唯一 TB6612 提交。 |
 | `sc_app_snapshot(app, snapshot)` | App、调用方缓冲 | `sc_app_status_t` | 复制只读快照：阶段、线路、编码器/Wheel、目标、控制器输出、经电机符号换算的 PWM、故障/降级、STBY、序号和时间。 |
@@ -715,7 +716,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 
 `degraded_bits` 单独记录 `IMU/DISPLAY/TELEMETRY`。MPU、OLED、HC-05 的初始化、刷新或入队失败只置对应降级位，不改变目标、PWM 或 STBY。OLED 异步 Service 后还必须读取状态和重试计数，不能只依赖 `write_line/refresh` 的同步返回。
 
-持久化配置结构未来必须包含 `magic`、`schema_version`、`payload_size` 和 `crc32`，但本阶段尚未实现 Flash Config Service。当前正式配置来源是 `sc_motor_defaults.h` 编译期常量；任何实际发车前都必须完成标定和调参并把两个 VALID 显式置 1。
+持久化配置结构未来必须包含 `magic`、`schema_version`、`payload_size` 和 `crc32`，但本阶段尚未实现 Flash Config Service。当前正式配置来源是 `sc_motor_defaults.h` 编译期常量。1061 CPR 下 200/500 mm/s 六轮闭环已通过，调参有效位为 1；标定有效位为 1，依据为卡尺直径、十圈中位、符号和正命令前进，落地滚动周长由用户豁免而非实测。
 
 本基线没有为电池电压分配 ADC 通道，因此不伪造“电池电压在线监测”能力。电源欠压由硬件复位和断电表现，软件重新启动后回到待命；上电前电压、极性和温升属于台架检查项。
 
@@ -749,7 +750,7 @@ Driver 层不得调用 Service、Control 或 Application。`sc_tb6612_apply()` �
 | `RESET` | 停止状态下重置编码器计数 | 运行或布防状态拒绝。 |
 | `HELP` | 输出命令列表 | 只读。 |
 
-Bench 固件同样依赖 STBY 安全序列和超时自动停机；它不进入 Debug/Release 正式产物。当前默认标定和 PID 来自 `sc_motor_defaults.h`，两个 VALID 仍为 0，因此 `STATUS` 和 RAW/SPEED 响应明确标记 `PARAM=UNVERIFIED`，仅表示受控台架实验参数。
+Bench 固件同样依赖 STBY 安全序列和超时自动停机；它不进入 Debug/Release 正式产物。当前 `FF_L=810/FF_R=815/Kp=100/Ki=750/Kd=0` 已通过 1061 CPR 标尺 200/500 mm/s 各三轮闭环。`STATUS` 和 RAW/SPEED 响应继续标记 `PARAM=UNVERIFIED`，表示参数只覆盖当前台架证据和用户豁免边界，不表示正式 App 的两个 VALID 为 0。
 
 CAPTURE 行格式固定为：
 
@@ -762,7 +763,7 @@ pwm_l,pwm_r,fault_bits,controller_mode
 
 RAW 与 SPEED 的发车和运行期都要求双轮 feedback valid、样本年龄不超过 30 ms；运行中任一条件失效时不等待新 sequence，立即记录 FEEDBACK fault、保存捕获、拉低 STBY 并返回 `ERR FEEDBACK`。任一侧 `|实际TB命令|>=150` 时记录 300 ms 窗口起始物理计数、时间和目标。窗口到期后，RAW 要求沿实验命令方向至少净增 20 个计数，该值是尚未完成实车标定的保守安全门槛；SPEED 要求控制器命令与目标同号，并按目标、实际经过时间、轮径和每转计数计算理论计数，要求净进展至少 20%。目标或输出为 0 的一侧豁免。无足够进展时 SAFE STOP、置对应左/右堵转 fault、记录捕获并返回 `ERR STALL`。
 
-`tools/sc_hc05_tune.ps1` 只接受 `COMx + 9600 8N1`，且所有 Action（包括 Probe）都必须从 COM 设备 DeviceID 查询 ContainerId，并验证同一 PnP Container 中存在名称匹配 `HC[- ]?05` 的设备。ContainerId 不可查、同容器无 HC-05、CH340、普通 USB serial 或仅名称含 Bluetooth 的通道均拒绝运行。动作包括 `Probe`、`SetPid`、`Identify`、`Step`、`Capture`；日志固定写入 `build/tune-logs`，UTF-8 无 BOM。Capture/Identify/Step 的捕获导出窗口均至少 30s。工具解析 `OK CAPTURE BEGIN N=<count>`，要求 CAP 行数精确相等、时间戳严格递增、mode 一致；Identify 和 Step 还要求首末覆盖至少 90% 期望时长且 fault 全为 0。不完整或故障数据先保留原始日志/CSV再抛错，不生成速度、ff 或 PID 性能结论。Identify 默认执行 3 轮 `RESET -> ARM -> RAW B 396 1000 -> STOP -> CAPTURE`，丢弃每轮前 30%，对后 70% 求左右中位速度。任一轮 vL/vR 非正，或三轮左右相对离散度 `(max-min)/median` 任一超过 10%，summary 写 `repeatability_ok=false` 并保留原始结果但不输出 cruise/ff；全部通过才给出 `0.97*min(vL,vR)` 和每侧 ff 建议。工具不修改源码或 VALID 标志。
+`tools/sc_hc05_tune.ps1` 只接受 `COMx + 9600 8N1`，且所有 Action（包括 Probe）都必须从 COM 设备 DeviceID 查询 ContainerId，并验证同一 PnP Container 中存在名称匹配 `HC[- ]?05` 的设备。ContainerId 不可查、同容器无 HC-05、CH340、普通 USB serial 或仅名称含 Bluetooth 的通道均拒绝运行。动作包括 `Probe`、`SetPid`、`Identify`、`Step`、`Capture`；日志固定写入 `build/tune-logs`，UTF-8 无 BOM。Capture/Identify/Step 的捕获导出窗口均至少 30s。工具解析 `OK CAPTURE BEGIN N=<count>`，要求 CAP 行数精确相等、时间戳严格递增、mode 一致；Identify 和 Step 还要求首末覆盖至少 90% 期望时长且 fault 全为 0。不完整或故障数据先保留原始日志/CSV再抛错，不生成速度、ff 或 PID 性能结论。当前 1061 CPR Identify 日志 `20261113-121905` 得到 `vL396=489/ vR396=486 mm/s`、离散度均 `1.0%`，建议 `ffL=810/ffR=815`；明确单次步长上限 30 后 `check-update` 通过。工具不修改源码或 VALID 标志。
 
 ### 8.3 HC-05 遥测
 
@@ -790,7 +791,7 @@ IWDG 初始化先写 `0xCCCC` 启动 IWDG/LSI，再写 `0x5555` 解锁并配置 
 - 只有 Application 已确认处于静止台架状态后，Config Service 才允许调用 Flash 擦除和写入原语。
 - 未来写入或读回失败必须进入配置 FATAL，下一次上电也必须读取到有效记录才能发车；当前尚未实现 Flash Config Service。
 - 默认恢复把 LF04 位序/极性、电机和编码器方向、轮径/计数和 IMU 零偏恢复为名义值，并令 `calibration_valid=0`；开始运动前必须重新完成方向与轮径标定。该操作不写入 PID 增益或找回时长。
-- 名义恢复值为：LF04 不倒序、不反相，左右电机和编码器符号均为 `+1`，左右计数均为 1040 count/rev，轮径为 48000 μm，gyro-Z 零偏为 0。
+- 当前恢复值为：LF04 不倒序、不反相，左编码器符号 `-1`、右编码器符号 `+1`、左右电机符号 `+1`，左/右计数均为 `1061 count/rev`，轮径为 `48600 μm`，gyro-Z 零偏为 0；标定有效已置 1，但不代表落地滚动周长实测完成。
 - 保存后立即回读 magic、版本、长度、字段和 CRC，显示或串口输出成功状态。
 
 ### 8.6 现场标定判据
@@ -800,7 +801,7 @@ IWDG 初始化先写 `0xCCCC` 启动 IWDG/LSI，再写 `0x5555` 解锁并配置 
 | LF04 黑白与左右顺序 | 探头离地约 3 cm，先放白底，再逐路放在黑线上；按车体左到右记录 `O1..O4`。 | 白底为 `1`，逐路黑线为 `0`；调换左右顺序后分类应改变，说明顺序被正确识别。 |
 | LF04 十字与丢线 | 将四路同时盖黑、同时置于白底，读取原始位型。 | 得到 `0000` 与 `1111` 两个不同原状态，分类分别为全黑十字候选与全白丢线候选。 |
 | 编码器供电与相序 | 用万用表确认编码器 VCC=3.3V；抬轮缓慢正向前进，观察 A/B。 | A/B 峰值为 3.3V；正转时按配置方向计数递增，A/B 交换后结果应改变。 |
-| 轮径与计数 | 名义 1040 count/rev、48 mm 轮径；人工转 10 圈并测直线距离。 | 实测距离与名义 1508 mm 的偏差不超过 2%；超出时更新每转计数或轮径标定。 |
+| 轮径与计数 | 左右均 `1061 count/rev`、游标卡尺轮径 `48.600 mm`；右轮离群保留。落地 10 圈滚动距离未测，由用户明确豁免。 | 当前 `CALIBRATION_VALID=1` 接受该豁免；后续如有整车直线数据，再评估几何参考 `1526.8 mm` 与负载滚动/打滑误差。 |
 | 左右电机正方向 | 抬轮，应用只给正目标速度。 | 两轮均向车体前方运动；任一方向相反，必须通过线束/软件方向配置纠正后再进入闭环。 |
 | TB6612 左右通道 | 单独给左、右轮小 PWM，保持 STBY 高。 | 左请求只带动左轮，右请求只带动右轮；不得出现左右错位或两轮同时意外动作。 |
 | MPU6050 零偏 | 车辆静止，采样窗口完成 bias，再左右旋转车体。 | 静止时角速度接近零，旋转方向符号正确；曲线只用于短时辅助。 |

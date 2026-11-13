@@ -238,6 +238,8 @@ try {
 
       $leftTotal = Get-StatusNumber -StatusLine $status -Field "Ltotal"
       $rightTotal = Get-StatusNumber -StatusLine $status -Field "Rtotal"
+      $leftSpeed = Get-StatusNumber -StatusLine $status -Field "Lspeed"
+      $rightSpeed = Get-StatusNumber -StatusLine $status -Field "Rspeed"
       $leftValid = Get-StatusNumber -StatusLine $status -Field "Lvalid"
       $rightValid = Get-StatusNumber -StatusLine $status -Field "Rvalid"
       if (($leftValid -ne 1) -or ($rightValid -ne 1)) {
@@ -245,25 +247,30 @@ try {
       }
       if ($case.Wheel -eq "L") {
         $activeTotal = $leftTotal
-        $oppositeTotal = $rightTotal
+        $activeSpeed = $leftSpeed
+        $oppositeSpeed = $rightSpeed
       }
       else {
         $activeTotal = $rightTotal
-        $oppositeTotal = $leftTotal
+        $activeSpeed = $rightSpeed
+        $oppositeSpeed = $leftSpeed
       }
-      if ($oppositeTotal -ne 0) {
-        throw ("opposite wheel moved: " + $status)
+      if ($oppositeSpeed -ne 0) {
+        throw ("opposite wheel mapped speed is nonzero: " + $status)
       }
       if ($activeTotal -eq 0) {
         throw ("active wheel produced no counts: " + $status)
       }
+      if ($activeSpeed -eq 0) {
+        throw ("active wheel mapped speed is zero: " + $status)
+      }
       $expectedNegative = $case.Speed.StartsWith("-")
-      $actualNegative = $activeTotal -lt 0
+      $actualNegative = $activeSpeed -lt 0
       if ($expectedNegative -ne $actualNegative) {
-        $message = ("{0} {1}: {2}" -f
-          $case.Wheel, $case.Speed, $status)
+        $message = ("{0} {1}: mapped speed {2}" -f
+          $case.Wheel, $case.Speed, $activeSpeed)
         $signMismatches.Add($message)
-        Write-Log ("ERROR: count sign differs: " + $message)
+        Write-Log ("ERROR: mapped speed sign differs: " + $message)
       }
     }
     if ($signMismatches.Count -ne 0) {
